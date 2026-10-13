@@ -1,0 +1,22 @@
+- **Context Enrichment**: Attach related entities from graph layer, temporal filters, and source credibility scores.
+- **Fallback Logging**: Track preference misses to tune thresholds and scheduling frequency.
+
+## 7. Maintenance & Decay
+- **TTL Policy**: Entries expire after `decay_factor * ingestion_timestamp` unless re-queried or manually pinned.
+- **Staleness Detection**: Monitor query success rate per topic; auto-re-ingest if coverage drops >30%.
+- **Pruning**: Weekly job removes entries with `confidence_score < 0.3` and no recent access.
+- **Versioning**: Keep last 3 revisions per URL to support rollback and trend analysis.
+
+## 8. Recommended Stack
+- **SearXNG**: Self-hosted v1.0+ with JSON API enabled
+- **Embeddings**: `sentence-transformers` (CPU-optimized) or `llama-cpp-python` for local LLM routing
+- **Vector DB**: Chroma (lightweight) or Qdrant (production)
+- **Scheduler**: APScheduler + Redis broker
+- **Orchestration**: Python `asyncio` + `httpx` for non-blocking SearXNG calls
+- **Monitoring**: Prometheus metrics for ingestion latency, memory hit rate, fallback frequency
+
+## 9. Security & Compliance
+- Sanitize URLs and strip tracking parameters before storage
+- Respect `robots.txt` and SearXNG instance policies
+- Encrypt sensitive metadata at rest; use TLS for all SearXNG communication
+- Implement query logging with PII redaction for audit trails
