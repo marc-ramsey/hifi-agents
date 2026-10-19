@@ -1,0 +1,29 @@
+# Place at /home/marc/build/LibreChat/librechat.yaml
+# Bind-mounted to /app/librechat.yaml via docker-compose.override.yml
+# One custom provider now; add more "- name:" blocks later.
+version: 1.3.17          # MUST match the image's ConfigVersion -- set by step 1 below
+cache: true
+
+endpoints:
+  custom:
+    # llama.cpp server (OpenAI-compatible) on mothership
+    - name: "Mothership"
+      apiKey: "local"                                # llama.cpp ignores it, field is required
+      baseURL: "http://mothership.local:8082/v1"
+      models:
+        default: ["think/Qwen3.8-Flash-Next"]
+        fetch: true                                  # picker comes from GET /v1/models
+      modelDisplayLabel: "Qwen"
+      titleConvo: true
+      titleModel: current_model                      # title with the conversation model
+      titleMessageRole: user                         # llama.cpp Qwen template is happier without system role
+
+webSearch:
+  searchProvider: "searxng"
+  searxngInstanceUrl: "http://maceo.local:8888"
+  # SSRF exemption: private/loopback hosts are refused unless listed. Exact host:port.
+  allowedAddresses: ["maceo.local:8888"]
+  searxngSearchOptions:
+    engines: "google,duckduckgo"
+    language: "en"
+  rerankerType: "none"
