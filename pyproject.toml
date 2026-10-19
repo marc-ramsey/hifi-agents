@@ -4,14 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "search-agent"
-version = "0.1.0"
-description = "SearXNG Persistent Memory Architecture"
+version = "0.2.0"
+description = "SearXNG persistent memory agent — SQLite + numpy"
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp",
-    "pydantic",
-    "sentence-transformers",
     "numpy",
+    "pydantic",
     "mcp",
 ]
 

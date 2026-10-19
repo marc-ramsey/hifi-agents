@@ -1,2 +1,1 @@
-from .stdin_stdout import StdinStdoutAdapter
-from .mcp import MCPAdapter
+"""I/O transport adapters for search-agent."""
