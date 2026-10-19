@@ -21,9 +21,21 @@ class RetentionConfig(BaseModel):
     top_k: int = 5
 
 
+def _default_db_path() -> str:
+    env = os.environ.get("SEARCH_AGENT_DB")
+    if env:
+        return env
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return os.path.join(xdg, "search-agent", "memory.db")
+    home = os.path.expanduser("~")
+    if home and home != "~":
+        return os.path.join(home, ".local", "share", "search-agent", "memory.db")
+    return "search_memory.db"
+
+
 class Settings(BaseModel):
     searxng: SearXNGConfig = Field(default_factory=SearXNGConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
-    db_path: str = Field(default_factory=lambda: os.environ.get(
-        "SEARCH_AGENT_DB", "search_memory.db"))
+    db_path: str = Field(default_factory=_default_db_path)

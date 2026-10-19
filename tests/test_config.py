@@ -14,7 +14,6 @@ def test_defaults():
     assert s.retention.similarity_threshold == 0.75
     assert s.retention.max_chunks == 10000
     assert s.retention.top_k == 5
-    assert s.db_path == "search_memory.db"
 
 
 def test_db_path_from_env(monkeypatch):
@@ -22,9 +21,17 @@ def test_db_path_from_env(monkeypatch):
     assert Settings().db_path == "/tmp/custom_search.db"
 
 
-def test_no_env_var_uses_default(monkeypatch):
+def test_db_path_default_uses_xdg(monkeypatch, tmp_path):
     monkeypatch.delenv("SEARCH_AGENT_DB", raising=False)
-    assert Settings().db_path == "search_memory.db"
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert Settings().db_path == str(tmp_path / "search-agent" / "memory.db")
+
+
+def test_db_path_home_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv("SEARCH_AGENT_DB", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert Settings().db_path == str(tmp_path / ".local" / "share" / "search-agent" / "memory.db")
 
 
 def test_partial_override():

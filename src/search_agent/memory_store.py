@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import numpy as np
 from typing import List, Dict, Any, Optional
@@ -10,6 +11,9 @@ class MemoryStore:
     def __init__(self, db_path: str, dimensions: int = 384):
         self.db_path = db_path
         self.dimensions = dimensions
+        parent = os.path.dirname(db_path)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._init_db()
