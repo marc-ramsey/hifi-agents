@@ -1,0 +1,16 @@
+.aider*
+
+# ZAP tooling state (regenerable index DB + WAL/SHM artifacts)
+.zap/
+
+# Runtime artifacts
+*.db
+search_memory.db
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
