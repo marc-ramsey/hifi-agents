@@ -14,8 +14,31 @@ dependencies = [
     "mcp",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.1",
+    "pytest-asyncio>=0.23",
+]
+
 [project.scripts]
 search-agent = "search_agent.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+source = ["search_agent"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
