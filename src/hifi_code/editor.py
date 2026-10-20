@@ -31,6 +31,10 @@ class Editor:
         with open(edit.path, "r", encoding="utf-8") as fh:
             content = fh.read()
 
+        if edit.old == edit.new:
+            return {"status": "noop", "reason": "old and new are identical",
+                    "edit": edit.to_dict()}
+
         if edit.old not in content:
             return {"status": "rejected", "reason": "old text not found",
                     "edit": edit.to_dict()}

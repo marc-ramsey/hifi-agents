@@ -29,7 +29,12 @@ class Planner:
         self.verifier = verifier
         self.goal = None
         self.step = 0
-        self.state = {"map": None, "history": [], "last_verify": None}
+        self.state = {
+            "map": None,
+            "history": [],
+            "last_verify": None,
+            "stall": 0,
+        }
 
     async def seed(self, goal: str, root: str = "."):
         self.goal = goal
@@ -136,6 +141,17 @@ class Planner:
             "step": self.step, "action": action,
             "decision": decision, "result": result,
         })
+        if self._stalled(action, result):
+            return {
+                "action": "finish",
+                "status": "stalled",
+                "ok": False,
+                "reason": (f"no progress for {self.settings.max_stalls} "
+                           f"consecutive steps"),
+                "hint": ("the loop is repeating itself or edits keep failing "
+                         "verify; re-check the goal, the target file, and the "
+                         "verify command"),
+            }
         return result
 
     async def _dispatch(self, action: str, decision: dict) -> dict:
@@ -302,3 +318,29 @@ class Planner:
     def _verify(self, decision: dict) -> dict:
         self.state["last_verify"] = self.verifier.verify(self.settings.verify)
         return self.state["last_verify"]
+
+    def _stalled(self, action: str, result: dict) -> bool:
+        """True once the loop has made no meaningful progress for ``max_stalls``
+        consecutive ticks.
+
+        Progress is an applied edit (a real file change) or a passing verify.
+        Everything else -- reads, navigations, rejected / no-op edits, and
+        failing verifies -- is stagnation. That is how the loop gets stuck
+        re-reading the same thing or re-submitting the same edit, so we surface
+        it as a terminal ``stalled`` finish instead of burning the whole step
+        budget.
+        """
+        if action == "edit":
+            if any(
+                e.get("status") == "applied" for e in result.get("edits", [])
+            ):
+                self.state["stall"] = 0
+            else:
+                self.state["stall"] += 1
+        elif action == "verify":
+            if result.get("ok"):
+                self.state["stall"] = 0
+            return False
+        else:
+            self.state["stall"] += 1
+        return self.state["stall"] >= self.settings.max_stalls

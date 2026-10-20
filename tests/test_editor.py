@@ -12,6 +12,15 @@ def test_apply_success(tmp_path):
     assert f.read_text() == "x = 42\ny = 2\n"
 
 
+def test_apply_noop_when_old_equals_new(tmp_path):
+    f = tmp_path / "a.py"
+    f.write_text("x = 1\n")
+    editor = Editor()
+    res = editor.apply(Edit(str(f), "x = 1", "x = 1"))
+    assert res["status"] == "noop"
+    assert f.read_text() == "x = 1\n"  # unchanged
+
+
 def test_apply_rejected_when_old_missing(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("x = 1\n")

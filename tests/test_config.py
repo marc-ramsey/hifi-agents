@@ -10,6 +10,7 @@ def test_defaults():
     assert s.llm.temperature == 0.0
     assert s.server_cmd == ["ast-bro", "mcp"]
     assert s.max_steps == 40
+    assert s.max_stalls == 12
     assert s.verify.run_tests is True
     assert s.verify.run_lint is True
     assert s.denylist == []

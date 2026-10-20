@@ -254,3 +254,70 @@ async def test_history_sent_as_valid_assistant_messages(planner):
     # the accumulated history entries appear as assistant messages
     assistant = [m for messages in cap.messages for m in messages if m["role"] == "assistant"]
     assert len(assistant) == 1
+
+
+async def test_stalled_after_repeated_rejected_edits(planner, tmp_path):
+    """Re-submitting an edit that can't apply stalls the loop (doesn't spin)."""
+    target = tmp_path / "a.py"
+    target.write_text("x = 1\n")
+    p, llm = planner
+    p.settings.max_stalls = 3
+    # old text is never present, so every edit is rejected (no progress).
+    bad_edit = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "old": "x = 999", "new": "x = 2"}],
+    })
+    llm.responses = [bad_edit]  # repeated every tick
+    await p.seed("g", ".")
+    await p.tick()  # 1: rejected, stall=1
+    await p.tick()  # 2: rejected, stall=2
+    result = await p.tick()  # 3: rejected, stall=3 -> stalled
+    assert result["action"] == "finish"
+    assert result["status"] == "stalled"
+    assert "no progress" in result["reason"]
+    assert target.read_text() == "x = 1\n"  # never changed
+
+
+async def test_stalled_after_repeated_reads(planner):
+    """Re-reading the same symbol stalls the loop instead of spinning."""
+    p, llm = planner
+    p.settings.max_stalls = 3
+    llm.responses = [
+        json.dumps({"action": "read", "path": "x.py", "symbols": ["f"]}),
+    ]
+    await p.seed("g", ".")
+    await p.tick()  # 1: read, stall=1
+    await p.tick()  # 2: read, stall=2
+    r3 = await p.tick()  # 3: read, stall=3 -> stalled
+    assert r3["action"] == "finish"
+    assert r3["status"] == "stalled"
+
+
+async def test_applied_edit_resets_stall_counter(planner, tmp_path):
+    """A real edit resets the stall counter, so exploration before it isn't
+    penalised."""
+    target = tmp_path / "a.py"
+    target.write_text("x = 1\n")
+    p, llm = planner
+    p.settings.max_stalls = 3
+    decisions = [
+        json.dumps({"action": "read", "path": "x.py", "symbols": ["f"]}),
+        json.dumps({"action": "read", "path": "x.py", "symbols": ["f"]}),
+        json.dumps({
+            "action": "edit",
+            "edits": [{"path": str(target), "old": "x = 1", "new": "x = 2"}],
+        }),
+        json.dumps({"action": "read", "path": "x.py", "symbols": ["f"]}),
+        json.dumps({"action": "read", "path": "x.py", "symbols": ["f"]}),
+    ]
+    llm.responses = decisions
+    await p.seed("g", ".")
+    await p.tick()  # read, stall=1
+    await p.tick()  # read, stall=2
+    r3 = await p.tick()  # edit applied -> stall reset to 0
+    assert r3["edits"][0]["status"] == "applied"
+    await p.tick()  # read, stall=1
+    r5 = await p.tick()  # read, stall=2
+    # Without the reset, five reads would have stalled at 3. The applied edit
+    # cleared the counter, so we are still not stalled.
+    assert r5.get("status") != "stalled"

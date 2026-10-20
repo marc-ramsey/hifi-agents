@@ -56,6 +56,10 @@ class Settings(BaseModel):
     server_cmd: list[str] = Field(default_factory=_default_server_cmd)
     verify: VerifyConfig = Field(default_factory=VerifyConfig)
     max_steps: int = 40
+    # Finish with a "stalled" reason after this many consecutive ticks that make
+    # no meaningful progress (no applied edit, no passing verify). Prevents the
+    # loop from spinning forever on repeated reads or re-submitted edits.
+    max_stalls: int = 12
     working_dir: str = "."
     db_path: str = Field(default_factory=_default_db_path)
     sandbox_enabled: bool = True
