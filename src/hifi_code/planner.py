@@ -36,11 +36,30 @@ class Planner:
         self.state["map"] = await self.astbro.digest(paths=[root])
         return self.state["map"]
 
+    @staticmethod
+    def _history_messages(history: list[dict]) -> list[dict]:
+        """Turn stored tick results into valid OpenAI assistant messages.
+
+        History entries are ``{step, action, decision, result}`` dicts with no
+        ``role`` key; the backend rejects such messages with a 502, so serialize
+        the decision as the assistant message before sending.
+        """
+        out = []
+        for entry in history[-6:]:
+            decision = entry.get("decision")
+            content = (
+                json.dumps(decision, ensure_ascii=False)
+                if isinstance(decision, dict)
+                else str(decision)
+            )
+            out.append({"role": "assistant", "content": content})
+        return out
+
     async def _llm_response(self) -> dict:
         messages = [
             {"role": "system", "content": system_prompt(self.goal, self._map_text(self.state["map"]))},
         ]
-        messages.extend(self.state["history"][-6:])
+        messages.extend(self._history_messages(self.state["history"]))
         messages.append(
             {"role": "user", "content": (
                 f"Step {self.step}. Goal: {self.goal}. "

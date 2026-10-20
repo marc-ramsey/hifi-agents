@@ -190,3 +190,48 @@ async def test_step_budget_stops_without_llm(planner):
     assert result["action"] == "finish"
     assert "budget" in result["reason"]
     assert llm.calls == 1
+
+
+class _CaptureMessagesLLM:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.messages = []
+        self.calls = 0
+
+    def chat(self, messages):
+        self.messages.append(messages)
+        idx = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return self.responses[idx]
+
+
+def test_history_messages_formats_role_keys():
+    history = [
+        {"step": 1, "action": "read",
+         "decision": {"action": "read", "path": "x.py"}, "result": {"raw": "abc"}},
+    ]
+    out = Planner._history_messages(history)
+    assert out == [
+        {"role": "assistant", "content": json.dumps({"action": "read", "path": "x.py"})}
+    ]
+
+
+async def test_history_sent_as_valid_assistant_messages(planner):
+    p, llm = planner
+    # finish after two ticks so two history entries accumulate
+    llm.responses = [
+        json.dumps({"action": "finish", "reason": "done"}),
+        json.dumps({"action": "finish", "reason": "done"}),
+    ]
+    cap = _CaptureMessagesLLM(llm.responses)
+    p.llm = cap
+    await p.seed("g", ".")
+    await p.tick()
+    await p.tick()
+    # every message across all calls must carry a role key, or the backend 502s
+    for messages in cap.messages:
+        for m in messages:
+            assert "role" in m
+    # the accumulated history entries appear as assistant messages
+    assistant = [m for messages in cap.messages for m in messages if m["role"] == "assistant"]
+    assert len(assistant) == 1
