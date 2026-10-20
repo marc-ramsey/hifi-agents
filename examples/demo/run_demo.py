@@ -75,6 +75,11 @@ async def main() -> None:
     with open(EXAMPLE, encoding="utf-8") as fh:
         print(fh.read())
 
+    # Leave the working tree clean: the demo intentionally mutates the fixture,
+    # so reset it here (after printing the result) instead of expecting the
+    # caller to revert it before committing.
+    _reset_example()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
