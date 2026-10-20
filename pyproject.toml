@@ -12,6 +12,8 @@ dependencies = [
     "numpy",
     "pydantic",
     "mcp",
+    "starlette",
+    "uvicorn",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,7 @@ test = [
 
 [project.scripts]
 search-agent = "search_agent.__main__:main"
+hifi-mcp = "hifi_mcp:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
