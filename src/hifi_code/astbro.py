@@ -35,11 +35,16 @@ class AstBro:
     async def _ensure(self):
         if self._session is None:
             from mcp.client.session import ClientSession
-            from mcp.client.stdio import stdio_client
+            from mcp.client.stdio import StdioServerParameters, stdio_client
 
-            self._client = stdio_client(self._cmd)
+            command, *args = self._cmd
+            server = StdioServerParameters(command=command, args=args)
+            self._client = stdio_client(server)
             self._read, self._write = await self._client.__aenter__()
-            self._session = ClientSession(self._read, self._write)
+            # This SDK version starts the dispatcher on __aenter__, so the
+            # session must be entered as an async context manager before
+            # initialize() can send requests.
+            self._session = await ClientSession(self._read, self._write).__aenter__()
             await self._session.initialize()
         elif not self._initialized:
             await self._session.initialize()

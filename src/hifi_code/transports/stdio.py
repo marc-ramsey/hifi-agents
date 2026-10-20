@@ -34,5 +34,5 @@ async def _drive(settings: Settings, goal: str, root: str):
 
 
 async def run(settings: Settings, goal: str, root: str = "."):
-    for result in _drive(settings, goal, root):
+    async for result in _drive(settings, goal, root):
         print(json.dumps(result, ensure_ascii=False))

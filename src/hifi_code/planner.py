@@ -8,6 +8,9 @@ step budget is exhausted.
 
 import json
 import logging
+import re
+
+import httpx
 
 from .config import Settings
 from .editor import Edit
@@ -35,7 +38,7 @@ class Planner:
 
     async def _llm_response(self) -> dict:
         messages = [
-            {"role": "system", "content": system_prompt(self.goal, self.state["map"])},
+            {"role": "system", "content": system_prompt(self.goal, self._map_text(self.state["map"]))},
         ]
         messages.extend(self.state["history"][-6:])
         messages.append(
@@ -49,20 +52,53 @@ class Planner:
 
     @staticmethod
     def _parse(content: str) -> dict:
+        text = content.strip()
+        # Strip markdown code fences: ```json ... ```
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
+            text = re.sub(r"\s*\n?```$", "", text)
+        # Isolate the first JSON object in the text.
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1:
+            text = text[start:end + 1]
         try:
-            return json.loads(content)
+            return json.loads(text)
         except json.JSONDecodeError:
-            start, end = content.find("{"), content.rfind("}")
-            if start != -1 and end != -1:
-                return json.loads(content[start:end + 1])
-            raise
+            pass
+        # Single-quoted / Python-literal JSON: {'action': 'read'} -> dict.
+        try:
+            import ast
+
+            value = ast.literal_eval(text)
+            if isinstance(value, dict):
+                return value
+        except (ValueError, SyntaxError):
+            pass
+        # Tolerate bare (unquoted) keys: {action: "read"} -> {"action": "read"}.
+        fixed = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", r'\1"\2"\3', text)
+        if fixed != text:
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(f"could not parse LLM JSON from: {content[:200]!r}")
 
     async def tick(self) -> dict:
         if self.step >= self.settings.max_steps:
             return {"action": "finish", "reason": "step budget exhausted"}
 
         self.step += 1
-        decision = await self._llm_response()
+        try:
+            decision = await self._llm_response()
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            # LLM transport/status/parse failure: degrade gracefully, don't crash.
+            return {
+                "action": "finish",
+                "status": "error",
+                "ok": False,
+                "reason": f"llm turn failed: {exc}",
+                "hint": "check the LLM endpoint and model availability",
+            }
         action = decision.get("action", "finish")
         result = await self._dispatch(action, decision)
         self.state["history"].append({
@@ -91,9 +127,121 @@ class Planner:
         return await fn(**args)
 
     async def _read(self, decision: dict) -> dict:
-        return await self.astbro.show(
-            path=decision.get("path"), **decision.get("args", {})
+        args = decision.get("args")
+        if not isinstance(args, dict):
+            args = {}
+        path = decision.get("path") or args.get("path")
+        symbols = self._resolve_symbols(decision)
+        if not symbols:
+            symbols = self._symbols_from_map(self._map_text(self.state["map"]), path)
+        if not path or not symbols:
+            return {
+                "status": "error",
+                "reason": "read needs a path and at least one symbol",
+                "hint": 'pass {path, symbols:["Planner"]} using names from the map',
+            }
+        return await self.astbro.show(path=path, symbols=symbols)
+
+    @staticmethod
+    def _resolve_symbols(decision: dict) -> list[str]:
+        """Collect symbol names the model named, from {symbols} or {symbol}.
+
+        The model is prompted to emit {path, symbols} but sometimes omits
+        ``symbols`` or writes a single ``symbol`` string, so both shapes are
+        accepted and normalized (``class Foo`` -> ``Foo``, ``run()`` -> ``run``).
+        """
+        raw: list[str] = []
+        for key in ("symbols", "symbol"):
+            val = decision.get(key)
+            if isinstance(val, list):
+                raw.extend(str(s) for s in val)
+            elif isinstance(val, str):
+                raw.append(val)
+        args = decision.get("args")
+        if isinstance(args, dict):
+            for key in ("symbols", "symbol"):
+                val = args.get(key)
+                if isinstance(val, list):
+                    raw.extend(str(s) for s in val)
+                elif isinstance(val, str):
+                    raw.append(val)
+        return [s for s in (Planner._normalize_symbol(s) for s in raw) if s]
+
+    @staticmethod
+    def _normalize_symbol(name: str) -> str:
+        s = re.sub(
+            r'^(async\s+)?(?:class|func|function|method|property|attribute|var)\s+',
+            "", str(name).strip(), flags=re.IGNORECASE,
         )
+        s = re.sub(r'\s*\[.*?\]\s*$', "", s)
+        s = re.sub(r"\(\)\s*$", "", s)
+        return s.strip()
+
+    @staticmethod
+    def _map_text(state_map) -> str:
+        if isinstance(state_map, str):
+            return state_map
+        if isinstance(state_map, dict):
+            for key in ("raw", "text", "content", "digest"):
+                val = state_map.get(key)
+                if isinstance(val, str):
+                    return val
+        return ""
+
+    @staticmethod
+    def _symbols_from_map(text: str, path: str) -> list[str]:
+        """Derive symbol names for ``path`` from a text digest map.
+
+        The digest is a text outline like::
+
+            /\n  planner.py ([small], 142 lines, ...)
+              class Planner  L21-141
+                __init__()  [async] seed()  [async] tick()
+
+        so we locate the file section and pull out every ``class Foo`` / ``foo()``
+        name to use as a fallback ``symbols`` list for ``show``.
+        """
+        if not text or not path:
+            return []
+        target = path.strip("./")
+        base = target.split("/")[-1]
+        header_re = re.compile(r"^(\s*)(\S+?)\s*\(")
+        kind_re = re.compile(
+            r"\b(?:class|func|function|method|property|attribute|var)\s+([A-Za-z_]\w*)"
+        )
+        call_re = re.compile(r"\b([A-Za-z_]\w*)\s*\(\)")
+
+        def header_matches(stripped: str) -> bool:
+            m = header_re.match(stripped)
+            if not m:
+                return False
+            hdr = m.group(2).strip("./")
+            return hdr == target or hdr.split("/")[-1] == base
+
+        symbols: list[str] = []
+        in_file = False
+        file_indent = -1
+        for raw in text.splitlines():
+            if not raw.strip() or raw.lstrip().startswith("#"):
+                continue
+            stripped = raw.strip()
+            if not in_file:
+                if header_matches(stripped):
+                    in_file = True
+                    file_indent = len(raw) - len(raw.lstrip())
+                continue
+            indent = len(raw) - len(raw.lstrip())
+            if indent <= file_indent:
+                in_file = False
+                if header_matches(stripped):
+                    in_file = True
+                    file_indent = indent
+                continue
+            symbols.extend(kind_re.findall(stripped))
+            symbols.extend(call_re.findall(stripped))
+
+        seen = set()
+        return [s for s in symbols if not (s in seen or seen.add(s))]
 
     async def _edit(self, decision: dict) -> dict:
         results = []

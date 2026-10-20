@@ -109,6 +109,77 @@ async def test_edit_blocked_by_denylist(planner, tmp_path):
     assert target.read_text() == "x = 1\n"  # untouched
 
 
+class _ShowCapture:
+    def __init__(self):
+        self.calls = []
+
+    async def show(self, path=None, symbols=None, **kwargs):
+        self.calls.append({"path": path, "symbols": symbols})
+        return {"symbols": [{"name": s} for s in (symbols or [])]}
+
+
+async def test_read_uses_explicit_symbols_normalized(planner):
+    p, llm = planner
+    show = _ShowCapture()
+    p.astbro.show = show.show
+    llm.responses = [
+        json.dumps({"action": "read", "path": "x.py", "symbols": ["class Foo", "bar()"]}),
+    ]
+    await p.seed("g", ".")
+    await p.tick()
+    assert show.calls[0]["symbols"] == ["Foo", "bar"]
+
+
+async def test_read_without_symbols_falls_back_to_map(planner):
+    p, llm = planner
+    map_text = (
+        "# legend: name() = callable\n"
+        "/\n"
+        "  planner.py ([small], 142 lines, 1 types, 10 methods)\n"
+        "    class Planner  L21-141\n"
+        "      __init__()  [async] seed()  [async] tick()\n"
+    )
+    show = _ShowCapture()
+    p.astbro.show = show.show
+    llm.responses = [json.dumps({"action": "read", "path": "planner.py"})]
+    await p.seed("g", ".")
+    p.state["map"] = {"raw": map_text}
+    await p.tick()
+    assert show.calls[0]["symbols"] == ["Planner", "__init__", "seed", "tick"]
+
+
+async def test_read_without_path_or_symbols_errors(planner):
+    p, llm = planner
+    show = _ShowCapture()
+    p.astbro.show = show.show
+    llm.responses = [json.dumps({"action": "read", "path": "empty.py"})]
+    await p.seed("g", ".")
+    p.state["map"] = {"raw": "# legend: name() = callable\n/\n  empty.py ([tiny], 3 lines)\n"}
+    result = await p.tick()
+    assert result["status"] == "error"
+    assert "symbol" in result["reason"]
+    assert show.calls == []
+
+
+async def test_llm_turn_failure_returns_terminal_error(planner):
+    class RaisingLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            raise RuntimeError("502 Bad Gateway")
+
+    p, _ = planner
+    p.llm = RaisingLLM()
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result["action"] == "finish"
+    assert result["status"] == "error"
+    assert result["ok"] is False
+    assert "502" in result["reason"]
+
+
 async def test_step_budget_stops_without_llm(planner):
     p, llm = planner
     p.settings.max_steps = 1
