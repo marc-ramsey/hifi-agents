@@ -34,6 +34,7 @@ class Planner:
     async def seed(self, goal: str, root: str = "."):
         self.goal = goal
         self.state["map"] = await self.astbro.digest(paths=[root])
+        self.state["tools"] = [t["name"] for t in await self.astbro.list_tools()]
         return self.state["map"]
 
     @staticmethod
@@ -56,8 +57,10 @@ class Planner:
         return out
 
     async def _llm_response(self) -> dict:
+        tools = "\n".join(f"- {t}" for t in self.state.get("tools", []))
         messages = [
-            {"role": "system", "content": system_prompt(self.goal, self._map_text(self.state["map"]))},
+            {"role": "system", "content": system_prompt(
+                self.goal, self._map_text(self.state["map"]), tools=tools)},
         ]
         messages.extend(self._history_messages(self.state["history"]))
         messages.append(
@@ -93,8 +96,17 @@ class Planner:
                 return value
         except (ValueError, SyntaxError):
             pass
-        # Tolerate bare (unquoted) keys: {action: "read"} -> {"action": "read"}.
+        # Tolerate bare (unquoted) keys and values: {action: navigate} ->
+        # {"action": "navigate"}. Keys are quoted first (bare word before :);
+        # then any remaining bare word after : or , that isn't a JSON literal.
+        # Values may be path-like (a/b/c.py), so allow / . - ~ # in the run.
         fixed = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", r'\1"\2"\3', text)
+        fixed = re.sub(
+            r"([:,]\s*)(?!(?:true|false|null)\b)"
+            r"([A-Za-z_][A-Za-z0-9_/\.\-~#]*)(?=[\s,}\]])",
+            r'\1"\2"',
+            fixed,
+        )
         if fixed != text:
             try:
                 return json.loads(fixed)
@@ -138,8 +150,16 @@ class Planner:
         return {"action": "finish", "ok": True, "reason": decision.get("reason", "done")}
 
     async def _navigate(self, decision: dict) -> dict:
-        tool = decision.get("tool")
-        args = decision.get("args", {})
+        tool = decision.get("tool") or (
+            decision.get("args") or {}).get("tool")
+        args = decision.get("args") or {}
+        known = set(self.state.get("tools", []))
+        if known and tool not in known:
+            return {
+                "status": "error",
+                "reason": f"unknown ast-bro tool: {tool}",
+                "hint": "valid tools: " + ", ".join(sorted(known)),
+            }
         fn = getattr(self.astbro, tool, None)
         if fn is None:
             return await self.astbro.call(tool, args)

@@ -25,6 +25,13 @@ class FakeAstBro:
     async def digest(self, paths=None, **kwargs):
         return {"digest": "seed"}
 
+    async def list_tools(self):
+        return [
+            {"name": "map", "description": ""},
+            {"name": "show", "description": ""},
+            {"name": "call", "description": ""},
+        ]
+
     async def map(self, paths=None, **kwargs):
         return {"files": []}
 
@@ -70,6 +77,18 @@ async def test_navigate_dispatch(planner):
     await p.seed("g", ".")
     result = await p.tick()
     assert result == {"files": []}
+
+
+async def test_navigate_unknown_tool_errors_gracefully(planner):
+    p, llm = planner
+    # "read" is a loop action, not an ast-bro tool; the model must not crash.
+    llm.responses = [json.dumps({"action": "navigate", "tool": "read", "args": {}})]
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result["status"] == "error"
+    assert "unknown ast-bro tool" in result["reason"]
+    assert "valid tools" in result["hint"]
+    assert "map" in result["hint"]
 
 
 async def test_edit_applies_then_verify(planner, tmp_path):

@@ -10,7 +10,7 @@ _ACTION_SCHEMA = (
 )
 
 
-def system_prompt(goal: str, digest: str = "") -> str:
+def system_prompt(goal: str, digest: str = "", tools: str = "") -> str:
     return (
         "You are hifi_code, an autonomous coding loop driven by ast-bro.\n"
         f"Goal: {goal}\n\n"
@@ -24,4 +24,6 @@ def system_prompt(goal: str, digest: str = "") -> str:
         "- After an edit, verify before finishing.\n"
         "- Respond with a single JSON object only.\n"
         f"{digest}"
+        + (f"\n\nAvailable ast-bro tools:\n{tools}" if tools else "")
+        + "\n"
     )
