@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 
-import mcp.types as types
+from mcp import types
 from mcp.server.lowlevel.server import Server
 from mcp.server.stdio import stdio_server
 

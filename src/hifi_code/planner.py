@@ -136,7 +136,19 @@ class Planner:
                 "hint": "check the LLM endpoint and model availability",
             }
         action = decision.get("action", "finish")
-        result = await self._dispatch(action, decision)
+        try:
+            result = await self._dispatch(action, decision)
+        except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+            # A primitive failed (malformed edit dict, unexpected tool kwargs, or
+            # an ast-bro tool error): degrade gracefully like an LLM failure
+            # instead of crashing the loop with a traceback.
+            return {
+                "action": "finish",
+                "status": "error",
+                "ok": False,
+                "reason": f"action failed: {exc}",
+                "hint": "the requested edit or tool call could not be applied",
+            }
         self.state["history"].append({
             "step": self.step, "action": action,
             "decision": decision, "result": result,

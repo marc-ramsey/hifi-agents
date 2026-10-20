@@ -7,4 +7,4 @@ MCP transports, newline-delimited JSON output.
 from .config import Settings
 from .planner import Planner
 
-__all__ = ["Settings", "Planner"]
+__all__ = ["Planner", "Settings"]

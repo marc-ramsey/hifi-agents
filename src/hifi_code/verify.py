@@ -10,7 +10,7 @@ from .config import VerifyConfig
 
 
 def _default_runner(cmd: list[str]):
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, check=False, capture_output=True, text=True)
 
 
 class VerifyResult:

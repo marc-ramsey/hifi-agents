@@ -8,7 +8,7 @@ surfaced here — the loop performs edits through the gated editor instead.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +18,9 @@ class AstBro:
 
     def __init__(
         self,
-        cmd: Optional[list[str]] = None,
+        cmd: list[str] | None = None,
         *,
-        session: Optional[Any] = None,
+        session: Any | None = None,
         server_name: str = "ast-bro",
     ):
         self._cmd = cmd or ["ast-bro", "mcp"]
@@ -54,17 +54,17 @@ class AstBro:
         if self._owns_session and self._session is not None:
             try:
                 await self._session.__aexit__(None, None, None)
-            except Exception as exc:  # pragma: no cover - teardown best-effort
+            except Exception as exc:  # noqa: BLE001 - teardown best-effort
                 logger.debug("error closing ast-bro session: %s", exc)
             self._session = None
         if self._client is not None:
             try:
                 await self._client.__aexit__(None, None, None)
-            except Exception:  # pragma: no cover
+            except Exception:  # noqa: S110, BLE001
                 pass
             self._client = None
 
-    async def call(self, name: str, arguments: Optional[dict] = None) -> dict:
+    async def call(self, name: str, arguments: dict | None = None) -> dict:
         """Generic dispatch to any tool by name; returns parsed JSON."""
         await self._ensure()
         result = await self._session.call_tool(name, arguments)
