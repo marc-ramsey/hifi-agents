@@ -1,0 +1,53 @@
+"""Surgical edits with a propose-diff gate.
+
+The loop's write primitive. Each edit replaces one exact ``old`` block with a
+``new`` block in a single file. In ``propose_only`` mode nothing is written to
+disk; the cumulative diff is surfaced instead for review.
+"""
+
+
+
+class Edit:
+    def __init__(self, path: str, old: str, new: str):
+        self.path = path
+        self.old = old
+        self.new = new
+
+    def to_dict(self) -> dict:
+        return {"path": self.path, "old": self.old, "new": self.new}
+
+
+class Editor:
+    def __init__(self, propose_only: bool = False):
+        self._propose_only = propose_only
+        self._applied: list[Edit] = []
+        self._proposed: list[Edit] = []
+
+    def apply(self, edit: Edit) -> dict:
+        if self._propose_only:
+            self._proposed.append(edit)
+            return {"status": "proposed", "edit": edit.to_dict()}
+
+        with open(edit.path, "r", encoding="utf-8") as fh:
+            content = fh.read()
+
+        if edit.old not in content:
+            return {"status": "rejected", "reason": "old text not found",
+                    "edit": edit.to_dict()}
+
+        content = content.replace(edit.old, edit.new, 1)
+        with open(edit.path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+        self._applied.append(edit)
+        return {"status": "applied", "edit": edit.to_dict()}
+
+    def diff(self) -> list[dict]:
+        """Cumulative list of every proposed + applied edit."""
+        return [e.to_dict() for e in self._proposed + self._applied]
+
+    def state(self) -> dict:
+        return {
+            "applied": [e.to_dict() for e in self._applied],
+            "proposed": [e.to_dict() for e in self._proposed],
+        }
