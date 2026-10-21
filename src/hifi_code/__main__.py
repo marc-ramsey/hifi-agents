@@ -25,10 +25,9 @@ def main():
     parser.add_argument("--root", default=".", help="Codebase root to seed from")
     parser.add_argument("--max-steps", type=int, default=None,
                         help="Override max loop steps")
-    parser.add_argument("--db", default=None, help="Path to state database")
     args = parser.parse_args()
 
-    settings = Settings(db_path=args.db) if args.db else Settings()
+    settings = Settings()
     if args.max_steps is not None:
         settings.max_steps = args.max_steps
 

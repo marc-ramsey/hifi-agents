@@ -596,7 +596,9 @@ class Planner:
         elif action == "verify":
             if result.get("ok"):
                 self.state["stall"] = 0
-            return False
+            else:
+                self.state["stall"] += 1
+            return self.state["stall"] >= self.settings.max_stalls
         else:
             self.state["stall"] += 1
         return self.state["stall"] >= self.settings.max_stalls

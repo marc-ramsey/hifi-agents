@@ -152,6 +152,31 @@ async def test_navigate_show_falls_back_to_map(planner):
     assert show.calls[0]["symbols"] == ["Planner", "__init__", "seed", "tick"]
 
 
+async def test_verify_failure_increments_stall_and_stops(planner):
+    """A failing verify increments the stall counter and halts the loop.
+
+    Regression: the verify branch used to neither reset nor increment the
+    stall counter, so a loop stuck in verify→verify→... could burn the full
+    max_steps instead of stalling at max_stalls.
+    """
+    p, llm = planner
+    async def fake_verify(cfg=None):
+        return {"ok": False, "reason": "still failing"}
+    p.verifier.verify = fake_verify
+    llm.responses = [json.dumps({"action": "verify"})]
+    await p.seed("g", ".")
+
+    r = await p.tick()
+    assert p.state["stall"] == 1
+    assert r["ok"] is False
+
+    for _ in range(p.settings.max_stalls - 1):
+        r = await p.tick()
+    assert p.state["stall"] == p.settings.max_stalls
+    assert r["action"] == "finish" and r["ok"] is False
+    assert r["status"] == "stalled"
+
+
 async def test_edit_applies_then_verify(planner, tmp_path):
     target = tmp_path / "a.py"
     target.write_text("x = 1\n")

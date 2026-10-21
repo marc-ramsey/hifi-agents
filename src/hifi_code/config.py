@@ -24,19 +24,6 @@ def _default_llm_model() -> str:
     return os.environ.get("HIFI_CODE_LLM_MODEL") or "gpt-4o-mini"
 
 
-def _default_db_path() -> str:
-    env = os.environ.get("HIFI_CODE_DB")
-    if env:
-        return env
-    xdg = os.environ.get("XDG_DATA_HOME")
-    if xdg:
-        return os.path.join(xdg, "hifi-code", "state.db")
-    home = os.path.expanduser("~")
-    if home and home != "~":
-        return os.path.join(home, ".local", "share", "hifi-code", "state.db")
-    return "hifi_code.db"
-
-
 class LLMConfig(BaseModel):
     base_url: str = Field(default_factory=_default_llm_base_url)
     api_key: str = ""
@@ -61,7 +48,6 @@ class Settings(BaseModel):
     # loop from spinning forever on repeated reads or re-submitted edits.
     max_stalls: int = 12
     working_dir: str = "."
-    db_path: str = Field(default_factory=_default_db_path)
     sandbox_enabled: bool = True
     denylist: list[str] = Field(default_factory=list)
     # When True the editor records proposed edits but never writes to disk.
