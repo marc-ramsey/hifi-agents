@@ -1,6 +1,6 @@
 """Self-contained stub servers for the bridge integration test.
 
-These let the test exercise the real search-agent HTTP bridge end-to-end without
+These let the test exercise the real hifi_search HTTP bridge end-to-end without
 hardcoding the user's live servers (localhost:8080 / maceo.local:8888). The test
 spawns one of these as a subprocess, points the bridge at it via env vars, and
 verifies the two processes can talk to each other over HTTP.

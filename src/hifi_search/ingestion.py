@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from typing import List, Dict, Any
+
 import aiohttp
 import numpy as np
 
@@ -24,8 +23,8 @@ class IngestionEngine:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def fetch(self, query: str, categories: str = None,
-                    language: str = None) -> List[Dict]:
+    async def fetch(self, query: str, categories: str | None = None,
+                    language: str | None = None) -> list[dict]:
         """Query SearXNG and return raw results."""
         session = await self._get_session()
         url = f"{self.settings.searxng.base_url}/search"
@@ -45,7 +44,7 @@ class IngestionEngine:
 
     @staticmethod
     def chunk(text: str, title: str, url: str,
-              max_words: int = 200, overlap: int = 30) -> List[Dict]:
+              max_words: int = 200, overlap: int = 30) -> list[dict]:
         """Split text into overlapping word chunks."""
         if not text or len(text.strip()) < 50:
             return []
@@ -65,7 +64,7 @@ class IngestionEngine:
             })
         return chunks
 
-    async def embed(self, texts: List[str]) -> np.ndarray:
+    async def embed(self, texts: list[str]) -> np.ndarray:
         """Batch embed texts via OpenAI-compatible API."""
         session = await self._get_session()
         url = f"{self.settings.embedding.base_url}/embeddings"
@@ -93,7 +92,7 @@ class IngestionEngine:
         logger.info("Embedded %d texts → shape %s", len(vectors), vectors.shape)
         return vectors
 
-    async def ingest(self, query: str, results: List[Dict]) -> int:
+    async def ingest(self, query: str, results: list[dict]) -> int:
         """Fetch, chunk, embed, and store. Returns count of new chunks."""
         new_count = 0
         seen_urls = set()

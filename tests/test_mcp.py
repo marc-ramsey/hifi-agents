@@ -8,7 +8,7 @@ needed.
 import pytest
 from mcp import types
 
-from search_agent.adapters.mcp import MCPAdapter
+from hifi_search.adapters.mcp import MCPAdapter
 
 
 class FakeRetrievalEngine:

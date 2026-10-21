@@ -1,26 +1,27 @@
 import os
+
 from pydantic import BaseModel, Field
 
 
 def _default_db_path() -> str:
-    env = os.environ.get("SEARCH_AGENT_DB")
+    env = os.environ.get("HIFI_SEARCH_DB")
     if env:
         return env
     xdg = os.environ.get("XDG_DATA_HOME")
     if xdg:
-        return os.path.join(xdg, "search-agent", "memory.db")
+        return os.path.join(xdg, "hifi-search", "memory.db")
     home = os.path.expanduser("~")
     if home and home != "~":
-        return os.path.join(home, ".local", "share", "search-agent", "memory.db")
+        return os.path.join(home, ".local", "share", "hifi-search", "memory.db")
     return "search_memory.db"
 
 
 def _searxng_base_url() -> str:
-    return os.environ.get("SEARCH_AGENT_SEARXNG_BASE_URL") or "http://maceo.local:8888"
+    return os.environ.get("HIFI_SEARCH_SEARXNG_BASE_URL") or "http://maceo.local:8888"
 
 
 def _embedding_base_url() -> str:
-    return os.environ.get("SEARCH_AGENT_EMBEDDING_BASE_URL") or "http://localhost:8080/v1"
+    return os.environ.get("HIFI_SEARCH_EMBEDDING_BASE_URL") or "http://localhost:8080/v1"
 
 
 class SearXNGConfig(BaseModel):

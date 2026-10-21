@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ class RetrievalEngine:
         self.settings = settings
 
     async def retrieve(self, query: str, mode: str = "preference",
-                       top_k: int = None) -> List[Dict]:
+                       top_k: int | None = None) -> list[dict]:
         """
         Retrieve relevant memory chunks.
 

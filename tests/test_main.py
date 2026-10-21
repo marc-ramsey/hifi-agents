@@ -1,4 +1,4 @@
-"""Tests for the CLI entry point (search_agent/__main__.main).
+"""Tests for the CLI entry point (hifi_search/__main__.main).
 
 Exercises argument handling and the stdio result/error paths without any
 network by monkeypatching the engines that main() constructs.
@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-import search_agent.__main__ as mod
+import hifi_search.__main__ as mod
 
 
 class _FakeEngine:
@@ -39,7 +39,7 @@ def patch_engines(monkeypatch):
 
 
 def test_no_query_prints_help_and_exits(monkeypatch, capsys):
-    monkeypatch.setattr(mod.sys, "argv", ["search-agent"])
+    monkeypatch.setattr(mod.sys, "argv", ["hifi-search"])
     with pytest.raises(SystemExit) as exc:
         mod.main()
     assert exc.value.code == 1
@@ -48,7 +48,7 @@ def test_no_query_prints_help_and_exits(monkeypatch, capsys):
 
 def test_stdio_prints_results_as_json_lines(monkeypatch, capsys, patch_engines):
     fake = patch_engines(results=[{"url": "https://a.com", "score": 0.9}])
-    monkeypatch.setattr(mod.sys, "argv", ["search-agent", "hello", "--mode", "parallel"])
+    monkeypatch.setattr(mod.sys, "argv", ["hifi-search", "hello", "--mode", "parallel"])
     mod.main()  # success path returns normally (no sys.exit)
 
     line = json.loads(capsys.readouterr().out.strip())
@@ -58,7 +58,7 @@ def test_stdio_prints_results_as_json_lines(monkeypatch, capsys, patch_engines):
 
 def test_stdio_no_results_exits_with_error(monkeypatch, capsys, patch_engines):
     patch_engines(results=[])
-    monkeypatch.setattr(mod.sys, "argv", ["search-agent", "hello"])
+    monkeypatch.setattr(mod.sys, "argv", ["hifi-search", "hello"])
     with pytest.raises(SystemExit) as exc:
         mod.main()
     assert exc.value.code == 1

@@ -7,10 +7,10 @@ any network access (no live SearXNG or embedding endpoint needed).
 import numpy as np
 import pytest
 
-from search_agent.config import Settings
-from search_agent.ingestion import IngestionEngine
-from search_agent.memory_store import MemoryStore
-from search_agent.retrieval import RetrievalEngine
+from hifi_search.config import Settings
+from hifi_search.ingestion import IngestionEngine
+from hifi_search.memory_store import MemoryStore
+from hifi_search.retrieval import RetrievalEngine
 
 # A tiny deterministic topic-embedding scheme: each known topic lights up one
 # dimension. Similar texts share dimensions; unrelated texts are orthogonal.

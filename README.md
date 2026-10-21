@@ -1,4 +1,4 @@
-# search-agent
+# hifi-search
 
 A persistent-memory agent for LLM tool-calling. It remembers web searches so
 follow-up queries can recall previously stored context instead of re-searching
@@ -51,9 +51,9 @@ Requires Python 3.10+. Runtime dependencies: `aiohttp`, `numpy`, `pydantic`, `mc
 Runs a single query and prints newline-delimited JSON results to stdout:
 
 ```bash
-search-agent "<your query>"                 # preference mode (memory-first)
-search-agent "<your query>" --mode parallel # memory-only, no live search
-search-agent "<your query>" --db ./custom.db
+hifi-search "<your query>"                 # preference mode (memory-first)
+hifi-search "<your query>" --mode parallel # memory-only, no live search
+hifi-search "<your query>" --db ./custom.db
 ```
 
 ### MCP server
@@ -61,7 +61,7 @@ search-agent "<your query>" --db ./custom.db
 Exposes a single `search_memory` tool over stdio for use with MCP clients:
 
 ```bash
-search-agent --transport mcp
+hifi-search --transport mcp
 ```
 
 The `search_memory` tool accepts:
@@ -74,12 +74,12 @@ The `search_memory` tool accepts:
 
 ## Configuration
 
-All settings live in `src/search_agent/config.py` as Pydantic models and can be
+All settings live in `src/hifi_search/config.py` as Pydantic models and can be
 overridden via environment variables.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `SEARCH_AGENT_DB` | `search_memory.db` | SQLite database path |
+| `HIFI_SEARCH_DB` | `search_memory.db` | SQLite database path |
 | `SearXNGConfig.base_url` | `http://maceo.local:8888` | SearXNG instance URL |
 | `SearXNGConfig.max_results` | `10` | Max results per SearXNG query |
 | `EmbeddingConfig.base_url` | `http://localhost:8080/v1` | Embedding endpoint URL |
@@ -102,6 +102,7 @@ overridden via environment variables.
 | `ingestion.py` | SearXNG fetch, chunking, batch embedding, persistence |
 | `retrieval.py` | Query embed + ranked recall (preference/parallel modes) |
 | `adapters/mcp.py` | MCP stdio transport (tool list + tool call) |
+| `adapters/http.py` | StreamableHTTP transport (tool list + tool call) |
 | `__main__.py` | CLI wiring, arg parsing, transport dispatch |
 
 ## Development

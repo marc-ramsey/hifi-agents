@@ -1,6 +1,6 @@
-"""End-to-end integration test for the search-agent HTTP bridge.
+"""End-to-end integration test for the hifi_search HTTP bridge.
 
-Spawns the real ``hifi-mcp`` bridge as a subprocess plus two stdlib stub servers
+Spawns the real ``hifi-search`` bridge as a subprocess plus two stdlib stub servers
 (an OpenAI-compatible embedding stub and a SearXNG stub) as subprocesses, points
 the bridge at the stubs *purely via env vars*, then drives it with a real MCP
 StreamableHTTP client. This proves the subprocesses actually talk to each other
@@ -93,12 +93,14 @@ def bridge(backends, tmp_path):
     """Spawn a fresh bridge with an isolated DB, pointed at the stubs via env."""
     port = find_free_port()
     env = dict(os.environ)
-    env["SEARCH_AGENT_EMBEDDING_BASE_URL"] = backends["embed"]
-    env["SEARCH_AGENT_SEARXNG_BASE_URL"] = backends["searxng"]
+    env["HIFI_SEARCH_EMBEDDING_BASE_URL"] = backends["embed"]
+    env["HIFI_SEARCH_SEARXNG_BASE_URL"] = backends["searxng"]
     cmd = [
         sys.executable,
-        "-c",
-        "import sys; from hifi_mcp import main; main()",
+        "-m",
+        "hifi_search",
+        "--transport",
+        "http",
         "--port",
         str(port),
         "--path",
@@ -130,7 +132,7 @@ async def _session(bridge):
 async def test_initialize_and_list_tools(bridge):
     async with _session(bridge) as session:
         init = await session.initialize()
-        assert init.server_info.name == "search-agent"
+        assert init.server_info.name == "hifi-search"
         tools = await session.list_tools()
         assert [t.name for t in tools.tools] == ["search_memory"]
         schema = tools.tools[0].input_schema

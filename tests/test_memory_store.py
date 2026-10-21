@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from search_agent.memory_store import MemoryStore
+from hifi_search.memory_store import MemoryStore
 
 DIM = 8  # matches the topic-embedding scheme in conftest
 

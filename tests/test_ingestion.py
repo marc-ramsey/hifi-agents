@@ -8,7 +8,7 @@ live SearXNG / embedding endpoint is required.
 import numpy as np
 import pytest
 
-from search_agent.ingestion import IngestionEngine
+from hifi_search.ingestion import IngestionEngine
 
 DIM = 8  # matches the topic-embedding scheme in conftest
 

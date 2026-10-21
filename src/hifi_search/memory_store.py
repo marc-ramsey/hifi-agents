@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 import sqlite3
+
 import numpy as np
-from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryStore:
@@ -61,7 +64,7 @@ class MemoryStore:
         return np.frombuffer(blob, dtype=np.float32).reshape(1, -1)
 
     def upsert(self, text: str, vector: np.ndarray, url: str,
-               title: str = "", metadata: Optional[Dict] = None) -> int:
+               title: str = "", metadata: dict | None = None) -> int:
         """Add or update a chunk. Returns chunk ID."""
         vec_blob = self._serialize(vector)
         meta_json = json.dumps(metadata or {})
@@ -87,7 +90,7 @@ class MemoryStore:
         self.conn.commit()
         return chunk_id
 
-    def query(self, vector: np.ndarray, top_k: int = 5) -> List[Dict]:
+    def query(self, vector: np.ndarray, top_k: int = 5) -> list[dict]:
         """Cosine similarity search. Returns top-k results."""
         # Normalize query
         q = vector.flatten().astype(np.float32)
@@ -122,7 +125,7 @@ class MemoryStore:
             })
         return results
 
-    def text_search(self, query: str, top_k: int = 5) -> List[Dict]:
+    def text_search(self, query: str, top_k: int = 5) -> list[dict]:
         """BM25-style text search via FTS5."""
         rows = self.conn.execute("""
             SELECT c.text, c.url, c.title, c.metadata,
@@ -152,7 +155,7 @@ class MemoryStore:
             return
         to_delete = n - keep
         ids = self.conn.execute(
-            f"SELECT id FROM chunks ORDER BY id ASC LIMIT ?", (to_delete,)
+            "SELECT id FROM chunks ORDER BY id ASC LIMIT ?", (to_delete,)
         ).fetchall()
         id_list = [r[0] for r in ids]
         if id_list:
@@ -161,10 +164,12 @@ class MemoryStore:
             self.conn.commit()
 
     def close(self):
-        self.conn.close()
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
 
     def __del__(self):
         try:
             self.close()
-        except Exception:
-            pass
+        except sqlite3.Error:
+            logger.exception("Error closing hifi_search database during cleanup")

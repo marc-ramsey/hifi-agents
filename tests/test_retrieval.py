@@ -37,7 +37,7 @@ async def test_preference_empty_memory_triggers_live_search(retrieval, store, se
         f"python w{i}" for i in range(220))}]
     # swap in a fake whose fetch returns live results and ingest stores them
     ingestion = Fake(store, settings, live_results=live)
-    from search_agent.retrieval import RetrievalEngine
+    from hifi_search.retrieval import RetrievalEngine
     engine = RetrievalEngine(store, ingestion, settings)
 
     results = await engine.retrieve("python", mode="preference")
@@ -59,7 +59,7 @@ async def test_preference_low_confidence_triggers_live_search(retrieval, store, 
         f"bread w{i}" for i in range(220))}]
     # swap in a fake whose fetch returns live results and ingest stores them
     ingestion = Fake(store, settings, live_results=live)
-    from search_agent.retrieval import RetrievalEngine
+    from hifi_search.retrieval import RetrievalEngine
     engine = RetrievalEngine(store, ingestion, settings)
 
     results = await engine.retrieve("bread", mode="preference")
@@ -75,7 +75,7 @@ async def test_preference_live_search_no_results_returns_empty(retrieval, store,
     vec = fake._embed_one("python and bread cooking together")
     store.upsert("mixed content", vec, url="https://mixed.com", title="Mixed")
     ingestion = Fake(store, settings, live_results=[])  # live search returns nothing
-    from search_agent.retrieval import RetrievalEngine
+    from hifi_search.retrieval import RetrievalEngine
     engine = RetrievalEngine(store, ingestion, settings)
 
     results = await engine.retrieve("bread", mode="preference")

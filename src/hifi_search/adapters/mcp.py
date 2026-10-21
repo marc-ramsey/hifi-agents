@@ -1,10 +1,8 @@
-"""MCP server adapter for search-agent."""
+"""MCP server adapter for hifi_search."""
 
-import json
 import logging
-from typing import Any
 
-import mcp.types as types
+from mcp import types
 from mcp.server.lowlevel.server import Server
 from mcp.server.stdio import stdio_server
 
@@ -54,7 +52,7 @@ class MCPAdapter:
 
         # Build the server with tool handlers
         self.server = Server(
-            "search-agent",
+            "hifi-search",
             on_list_tools=self._list_tools,
             on_call_tool=self._call_tool,
         )

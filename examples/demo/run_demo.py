@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,8 +73,8 @@ async def main() -> None:
     await run(settings, GOAL, root="examples/demo")
 
     print("\n--- examples/demo/greeting.py after loop ---")
-    with open(EXAMPLE, encoding="utf-8") as fh:
-        print(fh.read())
+    content = await asyncio.to_thread(Path(EXAMPLE).read_text, encoding="utf-8")
+    print(content)
 
     # Leave the working tree clean: the demo intentionally mutates the fixture,
     # so reset it here (after printing the result) instead of expecting the
