@@ -38,12 +38,15 @@ class Editor:
                     "edit": edit.to_dict()}
 
         if edit.old not in content:
-            return {"status": "rejected", "reason": "old text not found",
+            return {"status": "rejected",
+                    "reason": "old text not found in file; re-read the file to "
+                              "get the exact text, then retry",
                     "edit": edit.to_dict()}
 
         if content.count(edit.old) > 1:
             return {"status": "rejected",
-                    "reason": f"old text not unique (found {content.count(edit.old)} times)",
+                    "reason": f"old text not unique (found {content.count(edit.old)} times); "
+                              "include surrounding lines to make it unique, then retry",
                     "edit": edit.to_dict()}
 
         original = content
@@ -53,7 +56,7 @@ class Editor:
                 and self._is_valid_py(original)
                 and not self._is_valid_py(content)):
             return {"status": "rejected",
-                    "reason": "edit produced invalid Python",
+                    "reason": "edit produced invalid Python; fix the syntax and retry",
                     "edit": edit.to_dict()}
 
         with open(edit.path, "w", encoding="utf-8") as fh:
