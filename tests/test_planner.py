@@ -101,6 +101,56 @@ async def test_navigate_unknown_tool_errors_gracefully(planner):
     assert "map" in result["hint"]
 
 
+async def test_navigate_show_without_symbols_errors_gracefully(planner):
+    """A navigate:show with only a path (no symbols) must not crash ast-bro;
+    it degrades to the read hint instead of "missing field symbols"."""
+    p, llm = planner
+    llm.responses = [
+        json.dumps({"action": "navigate", "args": {
+            "tool": "show", "path": "x.py"}}),
+    ]
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result["status"] == "error"
+    assert "symbol" in result["reason"]
+
+
+async def test_navigate_show_with_symbols_calls_show(planner):
+    """navigate:show with explicit symbols is served like read."""
+    p, llm = planner
+    show = _ShowCapture()
+    p.astbro.show = show.show
+    llm.responses = [
+        json.dumps({"action": "navigate", "args": {
+            "tool": "show", "path": "x.py", "symbols": ["Foo"]}}),
+    ]
+    await p.seed("g", ".")
+    await p.tick()
+    assert show.calls[0]["symbols"] == ["Foo"]
+
+
+async def test_navigate_show_falls_back_to_map(planner):
+    """navigate:show with only a path derives symbols from the map, like read."""
+    p, llm = planner
+    map_text = (
+        "# legend: name() = callable\n"
+        "/\n"
+        "  planner.py ([small], 142 lines, 1 types, 10 methods)\n"
+        "    class Planner  L21-141\n"
+        "      __init__()  [async] seed()  [async] tick()\n"
+    )
+    show = _ShowCapture()
+    p.astbro.show = show.show
+    llm.responses = [
+        json.dumps({"action": "navigate", "args": {
+            "tool": "show", "path": "planner.py"}}),
+    ]
+    await p.seed("g", ".")
+    p.state["map"] = {"raw": map_text}
+    await p.tick()
+    assert show.calls[0]["symbols"] == ["Planner", "__init__", "seed", "tick"]
+
+
 async def test_edit_applies_then_verify(planner, tmp_path):
     target = tmp_path / "a.py"
     target.write_text("x = 1\n")
@@ -136,6 +186,140 @@ async def test_edit_blocked_by_denylist(planner, tmp_path):
     r1 = await p.tick()
     assert r1["edits"][0]["status"] == "blocked"
     assert target.read_text() == "x = 1\n"  # untouched
+
+
+class _ShowSource:
+    """ast-bro ``show`` stub returning exact symbol source, like the real server."""
+
+    def __init__(self, sources: dict):
+        self.sources = sources  # {path: {symbol: source}}
+
+    async def show(self, path=None, symbols=None, **kwargs):
+        files = []
+        for path_key, syms in self.sources.items():
+            matches = [
+                {"qualified_name": sym, "kind": "function",
+                 "start_line": 1, "end_line": 2, "source": src}
+                for sym, src in syms.items()
+            ]
+            if matches:
+                files.append({"path": path_key, "language": "python",
+                              "matches": matches})
+        return {"files": files}
+
+
+async def test_edit_symbol_scope_fetches_exact_source(planner, tmp_path):
+    """Symbol-scoped edit: harness reads the exact source via show, so the model
+    never reproduces the file body. It only names the symbol and the substring."""
+    target = tmp_path / "demo.py"
+    target.write_text('def greet(name):\n    return "hello " + name\n')
+    source = 'def greet(name):\n    return "hello " + name'
+    p, llm = planner
+    p.astbro.show = _ShowSource({str(target): {"greet": source}}).show
+    decision = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "symbol": "greet",
+                   "from": "hello ", "to": "hi "}],
+    })
+    llm.responses = [decision, json.dumps({"action": "finish", "reason": "done"})]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["edits"][0]["status"] == "applied"
+    assert target.read_text() == 'def greet(name):\n    return "hi " + name\n'
+
+
+async def test_edit_symbol_scope_missing_from_rejected(planner, tmp_path):
+    target = tmp_path / "demo.py"
+    target.write_text("x = 1\n")
+    p, llm = planner
+    p.astbro.show = _ShowSource({}).show
+    decision = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "symbol": "f", "to": "2"}],
+    })
+    llm.responses = [decision]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["edits"][0]["status"] == "rejected"
+    assert "from" in r1["edits"][0]["reason"]
+
+
+async def test_edit_symbol_scope_from_not_in_source_rejected(planner, tmp_path):
+    target = tmp_path / "demo.py"
+    target.write_text('def greet(name):\n    return "hello " + name\n')
+    p, llm = planner
+    p.astbro.show = _ShowSource({
+        str(target): {"greet": 'def greet(name):\n    return "hello " + name'},
+    }).show
+    decision = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "symbol": "greet",
+                   "from": "hello world", "to": "hi there"}],
+    })
+    llm.responses = [decision]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["edits"][0]["status"] == "rejected"
+    assert "not found in greet" in r1["edits"][0]["reason"]
+    assert target.read_text() == 'def greet(name):\n    return "hello " + name\n'  # untouched
+
+
+class _ShowRaw:
+    """ast-bro ``show`` stub returning the real ``raw`` outline format."""
+
+    def __init__(self, raw: str):
+        self.raw = raw
+
+    async def show(self, path=None, symbols=None, **kwargs):
+        return {"raw": self.raw}
+
+
+async def test_edit_symbol_scope_parses_real_raw_show(planner, tmp_path):
+    """Symbol-scoped edit against the real ast-bro ``raw`` outline: the harness
+    parses the ``# path:start-end Name (kind)`` header to recover exact source,
+    so the model still only names the symbol and the substring."""
+    target = tmp_path / "demo.py"
+    target.write_text('def greet(name):\n    return "hello " + name\n')
+    raw = (
+        f"# {target}:1-2 greet (function)\n"
+        'def greet(name):\n    return "hello " + name'
+    )
+    p, llm = planner
+    p.astbro.show = _ShowRaw(raw).show
+    decision = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "symbol": "greet",
+                   "from": "hello ", "to": "hi "}],
+    })
+    llm.responses = [decision, json.dumps({"action": "finish", "reason": "done"})]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["edits"][0]["status"] == "applied"
+    assert target.read_text() == 'def greet(name):\n    return "hi " + name\n'
+
+
+async def test_edit_symbol_scope_parses_method_raw_show(planner, tmp_path):
+    """A method's ``raw`` entry carries a ``# in: class X`` annotation line and a
+    fully-qualified header name; the symbol is matched by its trailing component."""
+    target = tmp_path / "demo.py"
+    target.write_text("class C:\n    def greet(self):\n        return 'hi'\n")
+    raw = (
+        f"# {target}:1-3 C.greet (method)\n"
+        "# in: class C\n"
+        "    def greet(self):\n        return 'hi'"
+    )
+    p, llm = planner
+    p.astbro.show = _ShowRaw(raw).show
+    decision = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "symbol": "greet",
+                   "from": "'hi'", "to": "'hey'"}],
+    })
+    llm.responses = [decision, json.dumps({"action": "finish", "reason": "done"})]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["edits"][0]["status"] == "applied"
+    assert target.read_text() == "class C:\n    def greet(self):\n        return 'hey'\n"
 
 
 class _ShowCapture:

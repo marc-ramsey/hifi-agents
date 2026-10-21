@@ -10,6 +10,7 @@ import ast
 import json
 import logging
 import re
+from typing import Any
 
 import httpx
 
@@ -259,6 +260,13 @@ class Planner:
             }
         if tool in ("map", "digest") and not args.get("paths"):
             return self.state.get("map") or {"ok": True, "map": ""}
+        # `show` pulls a symbol's full source, which is the `read` action's
+        # job. The model sometimes routes it here via navigate with only a
+        # path (no symbols), which would make ast-bro reject with
+        # "missing field symbols". Route it through _read so it resolves
+        # symbols, falls back to the map, or fails with a helpful hint.
+        if tool == "show":
+            return await self._read(decision)
         fn = getattr(self.astbro, tool, None)
         if fn is None:
             return await self.astbro.call(tool, args)
@@ -394,10 +402,94 @@ class Planner:
                 results.append({"status": "blocked", "reason": "denylist",
                                 "edit": edit})
                 continue
+            # Symbol-scoped edit: the model names a symbol and a substring to
+            # change; the harness fetches the exact source via ast-bro ``show`` so
+            # the model never has to reproduce the file body verbatim.
+            if "symbol" in edit:
+                results.append(await self._edit_symbol_scope(edit))
+                continue
             results.append(self.editor.apply(Edit(
                 path=edit["path"], old=edit["old"], new=edit["new"]
             )))
         return {"edits": results}
+
+    @staticmethod
+    def _source_of_symbol(shown: Any, symbol: str) -> str | None:
+        """Return the exact source of ``symbol`` from an ast-bro ``show`` result.
+
+        The real server returns a ``raw`` outline where each entry is a header
+        line ``# <path>:<start>-<end> <qualified_name> (<kind>)`` (optionally
+        followed by a ``# in: class X`` annotation) and the symbol's body
+        beneath it, terminated by the next header line. ``symbol`` is matched
+        against the header's qualified name either exactly (``greet``) or as its
+        trailing component (``_read`` within ``Planner._read``), and that body is
+        returned verbatim so the edit targets real bytes.
+
+        A structured ``{files: [{matches: [{qualified_name, source}]}]}`` result
+        (as the test fake emits) is still accepted for backward compatibility.
+        """
+        if isinstance(shown, dict):
+            for f in shown.get("files", []):
+                for m in f.get("matches", []):
+                    if m.get("qualified_name") == symbol:
+                        return m.get("source")
+            raw = shown.get("raw")
+        else:
+            raw = None
+        if not isinstance(raw, str):
+            return None
+        header_re = re.compile(
+            r"^#\s*(?P<path>.*?)(?::(?P<start>\d+)-(?P<end>\d+))\s+"
+            r"(?P<qual>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\((?P<kind>\w+)\)\s*$"
+        )
+        lines = raw.splitlines()
+        for i, line in enumerate(lines):
+            m = header_re.match(line)
+            # Require a real path (contains '/') so a body comment that merely
+            # looks like a header line is not mistaken for one.
+            if not m or "/" not in m.group("path"):
+                continue
+            qual = m.group("qual")
+            if qual != symbol and qual.split(".")[-1] != symbol:
+                continue
+            body = i + 1
+            if body < len(lines) and lines[body].lstrip().startswith("# in:"):
+                body += 1
+            end = body
+            while end < len(lines) and not header_re.match(lines[end]):
+                end += 1
+            return "\n".join(lines[body:end])
+        return None
+
+    async def _edit_symbol_scope(self, edit: dict) -> dict:
+        """Change a substring inside one symbol, fetching exact source via show.
+
+        The model supplies {path, symbol, from, to}; the harness reads the exact
+        symbol source (re-parsed live by ast-bro) so the edit targets real bytes
+        instead of text the model would otherwise have to reproduce from memory.
+        """
+        path = edit.get("path")
+        symbol = edit.get("symbol")
+        from_str = edit.get("from")
+        to_str = edit.get("to", "")
+        if not path or not symbol or from_str is None:
+            return {"status": "rejected",
+                    "reason": "symbol-scoped edit needs {path, symbol, from}",
+                    "edit": edit}
+        shown = await self.astbro.show(path=path, symbols=[symbol])
+        source = self._source_of_symbol(shown, symbol)
+        if source is None:
+            return {"status": "rejected",
+                    "reason": f"symbol {symbol!r} not found in {path}",
+                    "edit": edit}
+        if from_str not in source:
+            return {"status": "rejected",
+                    "reason": f"'{from_str}' not found in {symbol}; re-read the "
+                              f"symbol via read, then retry",
+                    "edit": edit}
+        return self.editor.apply(Edit(
+            path=path, old=source, new=source.replace(from_str, to_str)
+        ))
 
     def _verify(self, decision: dict) -> dict:
         self.state["last_verify"] = self.verifier.verify(self.settings.verify)
