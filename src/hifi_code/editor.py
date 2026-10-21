@@ -33,8 +33,19 @@ class Editor:
             self._proposed.append(edit)
             return {"status": "proposed", "edit": edit.to_dict()}
 
-        async with aiofiles.open(edit.path, "r", encoding="utf-8") as fh:
-            content = await fh.read()
+        try:
+            async with aiofiles.open(edit.path, "r", encoding="utf-8") as fh:
+                content = await fh.read()
+        except FileNotFoundError:
+            # ``old`` is empty: the file doesn't exist yet, so this edit creates
+            # it. A non-empty ``old`` on a missing file is a stale edit -- the
+            # model should have re-read or created the file first.
+            if edit.old not in ("", None):
+                return {"status": "rejected",
+                        "reason": "file does not exist yet; use empty old to "
+                                  "create it, then retry",
+                        "edit": edit.to_dict()}
+            content = ""
 
         # A ``region`` scopes the edit to a slice of the file. Symbol-scoped
         # edits pass the exact symbol source as the region so uniqueness is

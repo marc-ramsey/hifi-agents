@@ -73,6 +73,35 @@ async def test_apply_rejects_breaking_syntax(tmp_path):
     assert f.read_text() == "def f():\n    return 1\n"  # untouched, not written
 
 
+async def test_apply_creates_missing_file(tmp_path):
+    """An edit with empty ``old`` on a non-existent file writes ``new`` as the
+    full file content (a create)."""
+    f = tmp_path / "greeting.py"
+    editor = Editor()
+    res = await editor.apply(
+        Edit(str(f), "", "def greet(name):\n    return f'Hello, {name}!'\n"))
+    assert res["status"] == "applied"
+    assert f.read_text() == "def greet(name):\n    return f'Hello, {name}!'\n"
+
+
+async def test_apply_rejects_non_empty_old_on_missing_file(tmp_path):
+    f = tmp_path / "greeting.py"
+    editor = Editor()
+    res = await editor.apply(Edit(str(f), "x = 1", "x = 42"))
+    assert res["status"] == "rejected"
+    assert "does not exist" in res["reason"]
+    assert not f.exists()
+
+
+async def test_apply_rejects_invalid_python_on_new_file(tmp_path):
+    f = tmp_path / "bad.py"
+    editor = Editor()
+    res = await editor.apply(Edit(str(f), "", "def f(\n    return 1\n"))
+    assert res["status"] == "rejected"
+    assert "invalid Python" in res["reason"]
+    assert not f.exists()
+
+
 async def test_apply_accepts_edit_that_keeps_valid_syntax(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("def f():\n    return 1\n")
