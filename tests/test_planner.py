@@ -322,6 +322,27 @@ async def test_edit_symbol_scope_parses_method_raw_show(planner, tmp_path):
     assert target.read_text() == "class C:\n    def greet(self):\n        return 'hey'\n"
 
 
+async def test_edit_symbol_scope_ambiguous_substring_rejected(planner, tmp_path):
+    """A substring that appears twice in the symbol is rejected, not silently
+    replaced everywhere (the classic symbol-scoped edit bug)."""
+    target = tmp_path / "demo.py"
+    target.write_text("def f():\n    return x\n    return x\n")
+    source = "def f():\n    return x\n    return x"
+    p, llm = planner
+    p.astbro.show = _ShowSource({str(target): {"f": source}}).show
+    decision = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "symbol": "f",
+                   "from": "x", "to": "y"}],
+    })
+    llm.responses = [decision]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["edits"][0]["status"] == "rejected"
+    assert "not unique" in r1["edits"][0]["reason"]
+    assert target.read_text() == "def f():\n    return x\n    return x\n"  # untouched
+
+
 class _ShowCapture:
     def __init__(self):
         self.calls = []

@@ -1,7 +1,8 @@
 """Surgical edits with a propose-diff gate.
 
 The loop's write primitive. Each edit replaces one exact ``old`` block with a
-``new`` block in a single file. In ``propose_only`` mode nothing is written to
+``new`` block in a single file, optionally scoped to a ``region`` of the file
+(used by symbol-scoped edits). In ``propose_only`` mode nothing is written to
 disk; the cumulative diff is surfaced instead for review.
 """
 
@@ -25,7 +26,7 @@ class Editor:
         self._applied: list[Edit] = []
         self._proposed: list[Edit] = []
 
-    def apply(self, edit: Edit) -> dict:
+    def apply(self, edit: Edit, region: str | None = None) -> dict:
         if self._propose_only:
             self._proposed.append(edit)
             return {"status": "proposed", "edit": edit.to_dict()}
@@ -33,34 +34,52 @@ class Editor:
         with open(edit.path, "r", encoding="utf-8") as fh:
             content = fh.read()
 
+        # A ``region`` scopes the edit to a slice of the file. Symbol-scoped
+        # edits pass the exact symbol source as the region so uniqueness is
+        # enforced *within* the symbol: a common substring (``return``, ``self``)
+        # that appears twice would otherwise be replaced everywhere it occurs.
+        if region is not None:
+            if region not in content:
+                return {"status": "rejected",
+                        "reason": "region (symbol source) not found in file; "
+                                  "re-read the symbol via read, then retry",
+                        "edit": edit.to_dict()}
+            if content.count(region) > 1:
+                return {"status": "rejected",
+                        "reason": "region (symbol source) not unique in file; "
+                                  "disambiguate the symbol, then retry",
+                        "edit": edit.to_dict()}
+
+        search = region if region is not None else content
+
         if edit.old == edit.new:
             return {"status": "noop", "reason": "old and new are identical",
                     "edit": edit.to_dict()}
 
-        if edit.old not in content:
+        if edit.old not in search:
             return {"status": "rejected",
-                    "reason": "old text not found in file; re-read the file to "
-                              "get the exact text, then retry",
+                    "reason": "old text not found; re-read to get the exact text, "
+                              "then retry",
                     "edit": edit.to_dict()}
 
-        if content.count(edit.old) > 1:
+        if search.count(edit.old) > 1:
             return {"status": "rejected",
-                    "reason": f"old text not unique (found {content.count(edit.old)} times); "
+                    "reason": f"old text not unique (found {search.count(edit.old)} times); "
                               "include surrounding lines to make it unique, then retry",
                     "edit": edit.to_dict()}
 
         original = content
-        content = content.replace(edit.old, edit.new)
+        new_content = self._replace_once(content, edit.old, edit.new, region)
 
         if (edit.path.endswith(".py")
                 and self._is_valid_py(original)
-                and not self._is_valid_py(content)):
+                and not self._is_valid_py(new_content)):
             return {"status": "rejected",
                     "reason": "edit produced invalid Python; fix the syntax and retry",
                     "edit": edit.to_dict()}
 
         with open(edit.path, "w", encoding="utf-8") as fh:
-            fh.write(content)
+            fh.write(new_content)
 
         self._applied.append(edit)
         return {"status": "applied", "edit": edit.to_dict()}
@@ -73,6 +92,20 @@ class Editor:
         except SyntaxError:
             return False
         return True
+
+    @staticmethod
+    def _replace_once(content: str, old: str, new: str, region: str | None) -> str:
+        """Replace one occurrence of ``old`` with ``new``.
+
+        When ``region`` is given the replacement is confined to that slice of
+        ``content``; otherwise it behaves like ``str.replace`` over the whole
+        string (the caller has already guaranteed a single match).
+        """
+        if region is None:
+            return content.replace(old, new)
+        start = content.index(region)
+        end = start + len(region)
+        return content[:start] + content[start:end].replace(old, new, 1) + content[end:]
 
     def diff(self) -> list[dict]:
         """Cumulative list of every proposed + applied edit."""

@@ -487,9 +487,11 @@ class Planner:
                     "reason": f"'{from_str}' not found in {symbol}; re-read the "
                               f"symbol via read, then retry",
                     "edit": edit}
-        return self.editor.apply(Edit(
-            path=path, old=source, new=source.replace(from_str, to_str)
-        ))
+        # Delegate to the editor with the symbol source as the region so the
+        # uniqueness guard fires *inside* the symbol: a substring that appears
+        # twice would otherwise be replaced everywhere it occurs.
+        return self.editor.apply(Edit(path=path, old=from_str, new=to_str),
+                                 region=source)
 
     def _verify(self, decision: dict) -> dict:
         self.state["last_verify"] = self.verifier.verify(self.settings.verify)
