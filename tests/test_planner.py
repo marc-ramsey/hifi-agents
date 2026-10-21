@@ -321,3 +321,24 @@ async def test_applied_edit_resets_stall_counter(planner, tmp_path):
     # Without the reset, five reads would have stalled at 3. The applied edit
     # cleared the counter, so we are still not stalled.
     assert r5.get("status") != "stalled"
+
+
+def test_parse_bare_keys_and_values():
+    """Bare (unquoted) keys/values must be quoted so json.loads accepts them,
+    with every separator preserved."""
+    assert Planner._parse("{action: navigate, path: a/b.py}") == {
+        "action": "navigate",
+        "path": "a/b.py",
+    }
+    # literal true/null survive; they must not be quoted.
+    assert Planner._parse('{path: x, flag: true, n: null}') == {
+        "path": "x",
+        "flag": True,
+        "n": None,
+    }
+    # bare numbers stay unquoted; bare strings are quoted.
+    assert Planner._parse('{count: 5, ratio: -3.14, label: x}') == {
+        "count": 5,
+        "ratio": -3.14,
+        "label": "x",
+    }

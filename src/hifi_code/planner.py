@@ -6,6 +6,7 @@ editor), or verify (pytest/ruff) primitives. It stops on ``finish`` or when the
 step budget is exhausted.
 """
 
+import ast
 import json
 import logging
 import re
@@ -18,6 +19,43 @@ from .prompt import system_prompt
 from .sandbox import Sandbox
 
 logger = logging.getLogger(__name__)
+
+
+def _literal_dict(text: str) -> dict:
+    """ast.literal_eval the text if it's a (Python-style) dict, else raise."""
+    value = ast.literal_eval(text)
+    if isinstance(value, dict):
+        return value
+    raise ValueError("not a dict")
+
+
+_BARE_VALUE_CHARS = r"[A-Za-z0-9_./~#-]"
+
+
+def _quote_bare(text: str) -> str:
+    """Quote bare (unquoted) keys and values in a JSON-like string.
+
+    ``{action: navigate, path: a/b.py}`` -> ``{"action": "navigate", "path": "a/b.py"}`.
+
+    Bare keys are always quoted; bare numbers (``123``, ``-3.14``) are left
+    unquoted; bare strings are quoted. The delimiter (``{``, ``"``, or ``:``)
+    and any surrounding whitespace are captured and re-emitted so the
+    separators survive the substitution.
+    """
+    def repl(m: re.Match) -> str:
+        if m.group(3) is not None:  # bare key: group1=delim, group2=ws, group3=key
+            return f'{m.group(1)}{m.group(2)}"{m.group(3)}"'
+        if m.group(4) is not None:  # bare number: leave unquoted
+            return f'{m.group(4)}{m.group(5)}{m.group(6)}'
+        return f'{m.group(7)}{m.group(8)}"{m.group(9)}"'  # bare string: quote
+
+    return re.sub(
+        r"([{,])(\s*)([A-Za-z_]\w*)(?=\s*:)"                                  # bare key
+        r"|([,:])(\s*)(-?\d+(?:\.\d+)?)(?=[\s,}\]])"                          # bare number
+        r"|([,:])(\s*)(?!(?:true|false|null)\b)(" + _BARE_VALUE_CHARS + r"+)(?=[\s,}\]])",  # bare string
+        repl,
+        text,
+    )
 
 
 class Planner:
@@ -79,44 +117,28 @@ class Planner:
 
     @staticmethod
     def _parse(content: str) -> dict:
+        """Parse a JSON decision out of a possibly-messy LLM string.
+
+        Tolerates markdown fences, surrounding prose, single-quoted Python-style
+        dicts, and bare (unquoted) keys/values, e.g. ``action: navigate``.
+        """
         text = content.strip()
-        # Strip markdown code fences: ```json ... ```
-        if text.startswith("```"):
+        if text.startswith("```"):  # strip a ```json ... ``` fence
             text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
             text = re.sub(r"\s*\n?```$", "", text)
-        # Isolate the first JSON object in the text.
-        start, end = text.find("{"), text.rfind("}")
+        start, end = text.find("{"), text.rfind("}")  # isolate the first object
         if start != -1 and end != -1:
             text = text[start:end + 1]
+        for parser in (json.loads, _literal_dict):
+            try:
+                return parser(text)
+            except (ValueError, SyntaxError):
+                pass
+        # Quote bare keys/values ({action: navigate} -> {"action": "navigate"}).
         try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        # Single-quoted / Python-literal JSON: {'action': 'read'} -> dict.
-        try:
-            import ast
-
-            value = ast.literal_eval(text)
-            if isinstance(value, dict):
-                return value
+            return json.loads(_quote_bare(text))
         except (ValueError, SyntaxError):
             pass
-        # Tolerate bare (unquoted) keys and values: {action: navigate} ->
-        # {"action": "navigate"}. Keys are quoted first (bare word before :);
-        # then any remaining bare word after : or , that isn't a JSON literal.
-        # Values may be path-like (a/b/c.py), so allow / . - ~ # in the run.
-        fixed = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", r'\1"\2"\3', text)
-        fixed = re.sub(
-            r"([:,]\s*)(?!(?:true|false|null)\b)"
-            r"([A-Za-z_][A-Za-z0-9_/\.\-~#]*)(?=[\s,}\]])",
-            r'\1"\2"',
-            fixed,
-        )
-        if fixed != text:
-            try:
-                return json.loads(fixed)
-            except json.JSONDecodeError:
-                pass
         raise ValueError(f"could not parse LLM JSON from: {content[:200]!r}")
 
     async def tick(self) -> dict:
@@ -217,22 +239,23 @@ class Planner:
         ``symbols`` or writes a single ``symbol`` string, so both shapes are
         accepted and normalized (``class Foo`` -> ``Foo``, ``run()`` -> ``run``).
         """
-        raw: list[str] = []
-        for key in ("symbols", "symbol"):
-            val = decision.get(key)
-            if isinstance(val, list):
-                raw.extend(str(s) for s in val)
-            elif isinstance(val, str):
-                raw.append(val)
+        raw = list(Planner._symbol_values(decision))
         args = decision.get("args")
         if isinstance(args, dict):
-            for key in ("symbols", "symbol"):
-                val = args.get(key)
-                if isinstance(val, list):
-                    raw.extend(str(s) for s in val)
-                elif isinstance(val, str):
-                    raw.append(val)
+            raw.extend(Planner._symbol_values(args))
         return [s for s in (Planner._normalize_symbol(s) for s in raw) if s]
+
+    @staticmethod
+    def _symbol_values(node: dict) -> list[str]:
+        """Yield the raw symbol strings under ``symbols`` / ``symbol`` keys."""
+        out: list[str] = []
+        for key in ("symbols", "symbol"):
+            val = node.get(key)
+            if isinstance(val, list):
+                out.extend(str(s) for s in val)
+            elif isinstance(val, str):
+                out.append(val)
+        return out
 
     @staticmethod
     def _normalize_symbol(name: str) -> str:

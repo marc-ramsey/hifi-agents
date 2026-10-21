@@ -30,14 +30,13 @@ class LLMClient:
             resp = client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
+            try:
+                message = data["choices"][0]["message"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError(f"unexpected LLM response: {data!r}") from exc
         finally:
             if self._client is None:
                 client.close()
-
-        try:
-            message = data["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(f"unexpected LLM response: {data!r}") from exc
         # Reasoning models often leave ``content`` empty and put the answer in
         # ``reasoning_content``; fall back so the loop isn't starved of output.
         content = message.get("content") or message.get("reasoning_content") or ""

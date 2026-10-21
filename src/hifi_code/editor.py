@@ -6,7 +6,6 @@ disk; the cumulative diff is surfaced instead for review.
 """
 
 
-
 class Edit:
     def __init__(self, path: str, old: str, new: str):
         self.path = path
