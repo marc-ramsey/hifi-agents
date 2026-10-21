@@ -471,8 +471,23 @@ def test_history_messages_formats_role_keys():
          "decision": {"action": "read", "path": "x.py"}, "result": {"raw": "abc"}},
     ]
     out = Planner._history_messages(history)
+    # The harness result (the source the model read) is what gets surfaced, with
+    # the action label preserved so the model knows which turn it belongs to.
     assert out == [
-        {"role": "assistant", "content": json.dumps({"action": "read", "path": "x.py"})}
+        {"role": "assistant",
+         "content": json.dumps({"raw": "abc", "action": "read"})}
+    ]
+
+
+def test_history_messages_falls_back_to_decision_without_result():
+    history = [
+        {"step": 1, "action": "read",
+         "decision": {"action": "read", "path": "x.py"}},
+    ]
+    out = Planner._history_messages(history)
+    assert out == [
+        {"role": "assistant",
+         "content": json.dumps({"action": "read", "path": "x.py"})}
     ]
 
 

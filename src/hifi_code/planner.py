@@ -127,17 +127,26 @@ class Planner:
 
         History entries are ``{step, action, decision, result}`` dicts with no
         ``role`` key; the backend rejects such messages with a 502, so serialize
-        the decision as the assistant message before sending.
+        the outcome as the assistant message before sending. The ``result`` is the
+        harness's feedback for the model's previous turn -- the source a ``read``
+        returned, an ``edit``'s applied/rejected status, or a ``verify`` outcome --
+        which is what the model must see to react and self-correct, so it is
+        serialized in preference to the raw ``decision`` (falling back to it when
+        there is no result dict). The action label is preserved so the model knows
+        which turn each response belongs to.
         """
         out = []
         for entry in history[-6:]:
-            decision = entry.get("decision")
-            content = (
-                json.dumps(decision, ensure_ascii=False)
-                if isinstance(decision, dict)
-                else str(decision)
-            )
-            out.append({"role": "assistant", "content": content})
+            decision = entry.get("decision") or {}
+            payload = entry.get("result")
+            if not isinstance(payload, dict):
+                payload = decision
+            payload = dict(payload)
+            payload.setdefault("action", decision.get("action", "finish"))
+            out.append({
+                "role": "assistant",
+                "content": json.dumps(payload, ensure_ascii=False),
+            })
         return out
 
     async def _llm_response(self) -> dict:
@@ -410,13 +419,26 @@ class Planner:
 
     async def _edit(self, decision: dict) -> dict:
         results = []
+        # The edit path may live inside each edit ({path, old, new}) or once at
+        # the top level ({path, edits: [...]}); accept both. The schema only
+        # requires ``edits`` to be a list, and the model sometimes names the file
+        # once rather than repeating it on every edit.
+        top_path = decision.get("path") or (decision.get("args") or {}).get("path")
         for edit in decision.get("edits", []):
+            path = edit.get("path") or top_path
+            if not path:
+                results.append({"status": "rejected",
+                                "reason": "edit missing 'path'; include the file "
+                                          "path on the edit or at the top level",
+                                "edit": edit})
+                continue
+            edit = {**edit, "path": path}
             sandbox = Sandbox(
                 self.settings.working_dir,
                 self.settings.denylist,
                 enabled=self.settings.sandbox_enabled,
             )
-            if not sandbox.check_edit(edit["path"]):
+            if not sandbox.check_edit(path):
                 results.append({"status": "blocked", "reason": "denylist",
                                 "edit": edit})
                 continue
@@ -427,7 +449,7 @@ class Planner:
                 results.append(await self._edit_symbol_scope(edit))
                 continue
             results.append(await self.editor.apply(Edit(
-                path=edit["path"], old=edit["old"], new=edit["new"]
+                path=path, old=edit["old"], new=edit["new"]
             )))
         return {"edits": results}
 

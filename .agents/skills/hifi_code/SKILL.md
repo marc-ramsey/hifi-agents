@@ -16,6 +16,21 @@ Every tick the model emits one JSON action: `navigate | read | edit | verify |
 finish`. The loop enforces a step budget and a stall detector, so finish as
 soon as the goal is met and verify passes.
 
+## Required JSON shape
+
+Copy these field names **exactly** — the harness rejects any action whose fields
+don't match. The most common mistake is using the tool name as the key instead
+of the literal field `tool`.
+
+- `navigate`: `{ "action": "navigate", "tool": "<map|digest|search|callers|callees|impact|context|surface|find_related|implements>", "path": "<file or symbol>" }`
+- `read`: `{ "action": "read", "path": "<file or symbol>" }`
+- `edit`: `{ "action": "edit", "edits": [ { "path": "<file>", "old": "<exact source>", "new": "<replacement>" } ] }`
+- `verify`: `{ "action": "verify" }`
+- `finish`: `{ "action": "finish" }`
+
+For `navigate`, the field is literally the word `tool` and its **value** is the
+tool name (for example `"tool": "map"`). Do **not** write `{ "map": {...} }`.
+
 ## The workflow
 
 1. **Map first.** `navigate` with `map` (or `digest`) to get signatures and

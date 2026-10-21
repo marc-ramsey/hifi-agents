@@ -75,14 +75,22 @@ class Editor:
                               "then retry",
                     "edit": edit.to_dict()}
 
-        if search.count(edit.old) > 1:
+        # An empty ``old`` matches before every character, so the uniqueness guard
+        # would reject a legitimate top-insert; only enforce it for a real substring.
+        if edit.old != "" and search.count(edit.old) > 1:
             return {"status": "rejected",
                     "reason": f"old text not unique (found {search.count(edit.old)} times); "
                               "include surrounding lines to make it unique, then retry",
                     "edit": edit.to_dict()}
 
         original = content
-        new_content = self._replace_once(content, edit.old, edit.new, region)
+        # An empty ``old`` with no region inserts at the top of the file (creating
+        # it when it didn't exist); the generic replace would match the empty
+        # string before every character instead.
+        if edit.old == "" and region is None:
+            new_content = edit.new + content
+        else:
+            new_content = self._replace_once(content, edit.old, edit.new, region)
 
         if (edit.path.endswith(".py")
                 and self._is_valid_py(original)
