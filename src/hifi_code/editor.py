@@ -38,7 +38,12 @@ class Editor:
             return {"status": "rejected", "reason": "old text not found",
                     "edit": edit.to_dict()}
 
-        content = content.replace(edit.old, edit.new, 1)
+        if content.count(edit.old) > 1:
+            return {"status": "rejected",
+                    "reason": f"old text not unique (found {content.count(edit.old)} times)",
+                    "edit": edit.to_dict()}
+
+        content = content.replace(edit.old, edit.new)
         with open(edit.path, "w", encoding="utf-8") as fh:
             fh.write(content)
 

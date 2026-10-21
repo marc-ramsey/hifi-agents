@@ -31,12 +31,14 @@ def test_apply_rejected_when_old_missing(tmp_path):
     assert f.read_text() == "x = 1\n"  # untouched
 
 
-def test_apply_replaces_only_first_occurrence(tmp_path):
+def test_apply_rejected_when_old_not_unique(tmp_path):
     f = tmp_path / "a.py"
     f.write_text("f()\nf()\n")
     editor = Editor()
-    editor.apply(Edit(str(f), "f()", "g()"))
-    assert f.read_text() == "g()\nf()\n"
+    res = editor.apply(Edit(str(f), "f()", "g()"))
+    assert res["status"] == "rejected"
+    assert "not unique" in res["reason"]
+    assert f.read_text() == "f()\nf()\n"  # untouched
 
 
 def test_propose_only_never_writes(tmp_path):
