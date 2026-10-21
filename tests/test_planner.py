@@ -73,10 +73,20 @@ async def test_finish_action(planner):
 
 async def test_navigate_dispatch(planner):
     p, llm = planner
-    llm.responses = [json.dumps({"action": "navigate", "tool": "map", "args": {}})]
+    llm.responses = [json.dumps({"action": "navigate", "tool": "map", "args": {"paths": ["a.py"]}})]
     await p.seed("g", ".")
     result = await p.tick()
     assert result == {"files": []}
+
+
+async def test_navigate_map_without_paths_returns_cached_map(planner):
+    p, llm = planner
+    # A read tool called with no usable input is served the map already
+    # fetched at seed time instead of crashing on a null argument.
+    llm.responses = [json.dumps({"action": "navigate", "tool": "map", "args": {}})]
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result == {"digest": "seed"}
 
 
 async def test_navigate_unknown_tool_errors_gracefully(planner):

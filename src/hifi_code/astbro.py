@@ -67,6 +67,11 @@ class AstBro:
     async def call(self, name: str, arguments: dict | None = None) -> dict:
         """Generic dispatch to any tool by name; returns parsed JSON."""
         await self._ensure()
+        # Drop null args: ast-bro rejects ``null`` as an invalid type, and the
+        # loop should never send one. Genuinely-absent required fields still
+        # surface as a "missing field" error from the server.
+        if arguments:
+            arguments = {k: v for k, v in arguments.items() if v is not None}
         result = await self._session.call_tool(name, arguments)
         text = "".join(getattr(part, "text", "") for part in result.content)
         if result.is_error:

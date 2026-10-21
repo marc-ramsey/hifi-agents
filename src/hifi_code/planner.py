@@ -246,6 +246,10 @@ class Planner:
         tool = decision.get("tool") or (
             decision.get("args") or {}).get("tool")
         args = decision.get("args") or {}
+        # Drop null args: the LLM sometimes passes None, which ast-bro rejects
+        # as an invalid type. A read tool with no usable input is served the
+        # map already fetched at seed time instead of crashing.
+        args = {k: v for k, v in args.items() if v is not None}
         known = set(self.state.get("tools", []))
         if known and tool not in known:
             return {
@@ -253,6 +257,8 @@ class Planner:
                 "reason": f"unknown ast-bro tool: {tool}",
                 "hint": "valid tools: " + ", ".join(sorted(known)),
             }
+        if tool in ("map", "digest") and not args.get("paths"):
+            return self.state.get("map") or {"ok": True, "map": ""}
         fn = getattr(self.astbro, tool, None)
         if fn is None:
             return await self.astbro.call(tool, args)
