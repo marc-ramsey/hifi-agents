@@ -19,24 +19,27 @@ class _FakeClient:
     def __init__(self, payload):
         self._payload = payload
 
-    def post(self, url, headers=None, json=None):
+    async def post(self, url, headers=None, json=None):
         return _FakeResp(self._payload)
 
-    def close(self):
+    async def aclose(self):
         pass
 
 
-def _chat(payload):
+async def _chat(payload):
     llm = LLMClient(LLMConfig(), client=_FakeClient(payload))
-    return llm.chat([{"role": "user", "content": "hi"}])
+    try:
+        return await llm.chat([{"role": "user", "content": "hi"}])
+    finally:
+        await llm._client.aclose()
 
 
-def test_chat_returns_content():
+async def test_chat_returns_content():
     payload = {"choices": [{"message": {"content": '{"action": "finish"}'}}]}
-    assert _chat(payload) == '{"action": "finish"}'
+    assert await _chat(payload) == '{"action": "finish"}'
 
 
-def test_chat_falls_back_to_reasoning_content():
+async def test_chat_falls_back_to_reasoning_content():
     # Reasoning models often leave ``content`` empty and put the answer in
     # ``reasoning_content``; the client must not be starved of output.
     payload = {
@@ -47,14 +50,14 @@ def test_chat_falls_back_to_reasoning_content():
             },
         }],
     }
-    assert _chat(payload) == '{"action": "edit"}'
+    assert await _chat(payload) == '{"action": "edit"}'
 
 
-def test_chat_raises_on_malformed_payload():
+async def test_chat_raises_on_malformed_payload():
     payload = {"choices": []}
     raised = False
     try:
-        _chat(payload)
+        await _chat(payload)
     except RuntimeError as exc:
         raised = "unexpected LLM response" in str(exc)
     assert raised

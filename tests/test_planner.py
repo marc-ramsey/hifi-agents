@@ -1,5 +1,6 @@
 """Tests for the coding loop (planner) with fakes for LLM / ast-bro / verify."""
 
+import asyncio
 import json
 
 import pytest
@@ -15,7 +16,7 @@ class FakeLLM:
         self.responses = list(responses)
         self.calls = 0
 
-    def chat(self, messages):
+    async def chat(self, messages):
         idx = min(self.calls, len(self.responses) - 1)
         self.calls += 1
         return self.responses[idx]
@@ -400,7 +401,7 @@ async def test_llm_turn_failure_returns_terminal_error(planner):
         def __init__(self):
             self.calls = 0
 
-        def chat(self, messages):
+        async def chat(self, messages):
             self.calls += 1
             raise RuntimeError("502 Bad Gateway")
 
@@ -432,7 +433,7 @@ class _CaptureMessagesLLM:
         self.messages = []
         self.calls = 0
 
-    def chat(self, messages):
+    async def chat(self, messages):
         self.messages.append(messages)
         idx = min(self.calls, len(self.responses) - 1)
         self.calls += 1
@@ -581,3 +582,108 @@ async def test_unknown_action_finishes_as_error(planner):
     assert result["ok"] is False
     assert result["status"] == "error"
     assert "unknown action" in result["reason"]
+
+
+class _FakeSubAstBro:
+    """ast-bro stub for nested sub-planners, created per subgoal by _make_astbro."""
+
+    def __init__(self):
+        self.digest_calls = 0
+        self.closed = False
+
+    async def digest(self, paths=None, **kwargs):
+        self.digest_calls += 1
+        return {"digest": "seed"}
+
+    async def list_tools(self):
+        return []
+
+    async def close(self):
+        self.closed = True
+
+
+async def test_plan_without_subgoals_errors(planner):
+    p, llm = planner
+    llm.responses = [json.dumps({"action": "plan", "subgoals": []})]
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result["action"] == "finish"
+    assert result["status"] == "error"
+    assert result["ok"] is False
+    assert "no subgoals" in result["reason"]
+
+
+async def test_plan_rejects_overlapping_paths(planner):
+    """Two subgoals claiming the same file violate the disjoint-path invariant;
+    the plan fails loudly instead of racing two concurrent writers."""
+    p, llm = planner
+    llm.responses = [
+        json.dumps({
+            "action": "plan",
+            "subgoals": [
+                {"goal": "a", "path": "a.py"},
+                {"goal": "b", "path": "a.py"},
+            ],
+        }),
+    ]
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result["action"] == "finish"
+    assert result["status"] == "error"
+    assert "disjoint" in result["reason"]
+    assert "a.py" in result["reason"]
+
+
+async def test_plan_drives_each_subgoal_to_completion(planner):
+    """Each subgoal is driven to its own terminal finish in its own nested
+    Planner + ast-bro session, and the terminal results are concatenated."""
+    p, llm = planner
+    llm.responses = [
+        json.dumps({"action": "plan", "subgoals": [
+            {"goal": "a", "path": "a.py"},
+            {"goal": "b", "path": "b.py"},
+            {"goal": "c", "path": "c.py"},
+        ]}),
+        json.dumps({"action": "finish", "reason": "done"}),
+    ]
+    created = []
+    p._make_astbro = lambda: (created.append(_FakeSubAstBro()) or created[-1])
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert len(created) == 3  # one fresh session per subgoal
+    assert all(f.closed for f in created)  # each session closed after driving
+    subgoals = result["subgoals"]
+    assert len(subgoals) == 3
+    assert all(r["action"] == "finish" for r in subgoals)
+
+
+async def test_plan_runs_subgoals_concurrently(planner):
+    """Subgoals actually run concurrently, not one-after-another: with a shared
+    release gate, both subgoals start their work before either is unblocked."""
+    p, llm = planner
+    llm.responses = [
+        json.dumps({"action": "plan", "subgoals": [
+            {"goal": "a", "path": "a.py"},
+            {"goal": "b", "path": "b.py"},
+        ]}),
+        json.dumps({"action": "finish", "reason": "done"}),
+    ]
+
+    started = []
+    release = asyncio.Event()
+
+    class _SlowAstBro(_FakeSubAstBro):
+        async def digest(self, paths=None, **kwargs):
+            started.append(1)
+            await release.wait()
+            return {"digest": "seed"}
+
+    p._make_astbro = _SlowAstBro
+    await p.seed("g", ".")
+
+    task = asyncio.create_task(p.tick())
+    await asyncio.sleep(0.05)  # let both subgoals reach their release gate
+    assert len(started) == 2, "both subgoals should start before either is released"
+    release.set()
+    result = await task
+    assert len(result["subgoals"]) == 2

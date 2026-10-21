@@ -7,6 +7,7 @@ step budget is exhausted.
 """
 
 import ast
+import asyncio
 import json
 import logging
 import re
@@ -15,9 +16,10 @@ from typing import Any
 import httpx
 
 from .config import Settings
-from .editor import Edit
+from .editor import Edit, Editor
 from .prompt import system_prompt
 from .sandbox import Sandbox
+from .verify import Verifier
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +152,7 @@ class Planner:
                 "Choose the next action; respond with JSON only."
             )}
         )
-        content = self.llm.chat(messages)
+        content = await self.llm.chat(messages)
         return self._parse(content)
 
     @staticmethod
@@ -231,8 +233,10 @@ class Planner:
             return await self._read(decision)
         if action == "edit":
             return await self._edit(decision)
+        if action == "plan":
+            return await self._plan(decision)
         if action == "verify":
-            return self._verify(decision)
+            return await self._verify(decision)
         if action == "finish":
             return {"action": "finish", "ok": True, "reason": decision.get("reason", "done")}
         return {
@@ -240,7 +244,7 @@ class Planner:
             "status": "error",
             "ok": False,
             "reason": f"unknown action: {action!r}",
-            "hint": "valid actions: navigate | read | edit | verify | finish",
+            "hint": "valid actions: navigate | read | edit | plan | verify | finish",
         }
 
     async def _navigate(self, decision: dict) -> dict:
@@ -408,7 +412,7 @@ class Planner:
             if "symbol" in edit:
                 results.append(await self._edit_symbol_scope(edit))
                 continue
-            results.append(self.editor.apply(Edit(
+            results.append(await self.editor.apply(Edit(
                 path=edit["path"], old=edit["old"], new=edit["new"]
             )))
         return {"edits": results}
@@ -490,12 +494,86 @@ class Planner:
         # Delegate to the editor with the symbol source as the region so the
         # uniqueness guard fires *inside* the symbol: a substring that appears
         # twice would otherwise be replaced everywhere it occurs.
-        return self.editor.apply(Edit(path=path, old=from_str, new=to_str),
-                                 region=source)
+        return await self.editor.apply(Edit(path=path, old=from_str, new=to_str),
+                                       region=source)
 
-    def _verify(self, decision: dict) -> dict:
-        self.state["last_verify"] = self.verifier.verify(self.settings.verify)
+    async def _verify(self, decision: dict) -> dict:
+        self.state["last_verify"] = await self.verifier.verify(self.settings.verify)
         return self.state["last_verify"]
+
+    async def _plan(self, decision: dict) -> dict:
+        """Drive a goal decomposition in parallel across disjoint paths.
+
+        The model supplies ``{subgoals: [{goal, path}, ...]}``; each subgoal is a
+        self-contained coding target for one file. Paths must be disjoint -- that
+        is the invariant that makes running them concurrently safe (no two tasks
+        write the same file, so the editor's uniqueness guard and the file writes
+        never race). Each subgoal is driven to completion by its own nested
+        Planner, and their terminal results are concatenated.
+        """
+        subgoals = decision.get("subgoals", [])
+        if not subgoals:
+            return {
+                "action": "finish",
+                "status": "error",
+                "ok": False,
+                "reason": "plan produced no subgoals",
+                "hint": "provide subgoals: [{goal, path}, ...]",
+            }
+
+        # Enforce the disjoint-path invariant: a path claimed by 2+ subgoals would
+        # let two concurrent tasks write the same file. Fail loudly rather than
+        # race.
+        claimed: dict[str, int] = {}
+        for g in subgoals:
+            path = g.get("path") or "."
+            claimed[path] = claimed.get(path, 0) + 1
+        conflicts = sorted(p for p, n in claimed.items() if n > 1)
+        if conflicts:
+            return {
+                "action": "finish",
+                "status": "error",
+                "ok": False,
+                "reason": ("subgoals share paths (violate disjoint-path "
+                           f"invariant): {conflicts}"),
+                "hint": "each subgoal must target a distinct file path",
+            }
+
+        results = await asyncio.gather(
+            *(self._drive_subgoal(g) for g in subgoals)
+        )
+        return {"subgoals": results}
+
+    async def _drive_subgoal(self, subgoal: dict) -> dict:
+        """Drive one subgoal to a terminal finish in its own Planner + session."""
+        goal = subgoal.get("goal", "")
+        path = subgoal.get("path") or "."
+        if not goal:
+            return {"status": "error",
+                    "reason": "subgoal missing 'goal'",
+                    "subgoal": subgoal}
+        astbro = self._make_astbro()
+        editor = Editor(propose_only=self.settings.propose_only)
+        verifier = Verifier()
+        sub_planner = Planner(self.settings, self.llm, astbro, editor, verifier)
+        try:
+            await sub_planner.seed(goal, path)
+            while True:
+                result = await sub_planner.tick()
+                if result.get("action") == "finish":
+                    return result
+        finally:
+            await astbro.close()
+
+    def _make_astbro(self):
+        """Construct the ast-bro client for a nested sub-planner.
+
+        Each concurrent subgoal gets its own session because the underlying MCP
+        stdio stream is not safe to share across coroutines. Tests monkeypatch
+        this to inject a fake.
+        """
+        from .astbro import AstBro
+        return AstBro(cmd=self.settings.server_cmd)
 
     def _stalled(self, action: str, result: dict) -> bool:
         """True once the loop has made no meaningful progress for ``max_stalls``

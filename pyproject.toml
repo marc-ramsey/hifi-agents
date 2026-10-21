@@ -8,6 +8,7 @@ version = "0.2.0"
 description = "HiFi memory-backed search agent"
 requires-python = ">=3.10"
 dependencies = [
+    "aiofiles",
     "aiohttp",
     "httpx",
     "numpy",

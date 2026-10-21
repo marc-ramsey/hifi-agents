@@ -27,8 +27,10 @@ async def _drive(settings: Settings, goal: str, root: str):
             yield result
             if result.get("action") == "finish":
                 break
-            if "edits" in result:
-                yield verifier.verify(settings.verify)
+            # After edits or a plan (which ran parallel subtasks that may have
+            # written files), run verify to confirm nothing broke.
+            if "edits" in result or "subgoals" in result:
+                yield await verifier.verify(settings.verify)
     finally:
         await astbro.close()
 

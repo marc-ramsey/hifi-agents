@@ -4,13 +4,33 @@ A command runner is injectable so tests can supply a fake; the default runs
 subprocesses. ``verify`` composes the configured checks and reports overall ok.
 """
 
-import subprocess
+import asyncio
 
 from .config import VerifyConfig
 
 
-def _default_runner(cmd: list[str]):
-    return subprocess.run(cmd, check=False, capture_output=True, text=True)
+class _Proc:
+    """Minimal stand-in for ``subprocess.CompletedProcess`` with text streams."""
+
+    def __init__(self, stdout: str, stderr: str, returncode: int):
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+async def _default_runner(cmd: list[str]):
+    """Run ``cmd`` and return a ``_Proc`` with decoded text output."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    return _Proc(
+        stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout,
+        stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr,
+        proc.returncode,
+    )
 
 
 class VerifyResult:
@@ -30,8 +50,8 @@ class Verifier:
     def __init__(self, *, runner=None):
         self._runner = runner or _default_runner
 
-    def run(self, cmd: list[str]) -> VerifyResult:
-        proc = self._runner(cmd)
+    async def run(self, cmd: list[str]) -> VerifyResult:
+        proc = await self._runner(cmd)
         output = proc.stdout or proc.stderr or ""
         lines = [line for line in output.splitlines() if line.strip()]
         returncode = proc.returncode
@@ -49,12 +69,12 @@ class Verifier:
             output=output,
         )
 
-    def verify(self, cfg: VerifyConfig) -> dict:
+    async def verify(self, cfg: VerifyConfig) -> dict:
         checks = []
         if cfg.run_tests:
-            checks.append(self.run(cfg.test_cmd))
+            checks.append(await self.run(cfg.test_cmd))
         if cfg.run_lint:
-            checks.append(self.run(cfg.lint_cmd))
+            checks.append(await self.run(cfg.lint_cmd))
         return {
             "ok": all(check.ok for check in checks),
             "checks": [check.to_dict() for check in checks],

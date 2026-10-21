@@ -9,6 +9,8 @@ disk; the cumulative diff is surfaced instead for review.
 
 import ast
 
+import aiofiles
+
 
 class Edit:
     def __init__(self, path: str, old: str, new: str):
@@ -26,13 +28,13 @@ class Editor:
         self._applied: list[Edit] = []
         self._proposed: list[Edit] = []
 
-    def apply(self, edit: Edit, region: str | None = None) -> dict:
+    async def apply(self, edit: Edit, region: str | None = None) -> dict:
         if self._propose_only:
             self._proposed.append(edit)
             return {"status": "proposed", "edit": edit.to_dict()}
 
-        with open(edit.path, "r", encoding="utf-8") as fh:
-            content = fh.read()
+        async with aiofiles.open(edit.path, "r", encoding="utf-8") as fh:
+            content = await fh.read()
 
         # A ``region`` scopes the edit to a slice of the file. Symbol-scoped
         # edits pass the exact symbol source as the region so uniqueness is
@@ -78,8 +80,8 @@ class Editor:
                     "reason": "edit produced invalid Python; fix the syntax and retry",
                     "edit": edit.to_dict()}
 
-        with open(edit.path, "w", encoding="utf-8") as fh:
-            fh.write(new_content)
+        async with aiofiles.open(edit.path, "w", encoding="utf-8") as fh:
+            await fh.write(new_content)
 
         self._applied.append(edit)
         return {"status": "applied", "edit": edit.to_dict()}
