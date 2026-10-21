@@ -29,7 +29,7 @@ class Sandbox:
         self.enabled = enabled
 
     def is_denied(self, path: str) -> bool:
-        target = _abs(path)
+        target = _abs(path, base=self.working_dir)
         # Containment: the file must live inside the working directory.
         if not target.startswith(self.working_dir + os.sep):
             return True

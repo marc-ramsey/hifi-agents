@@ -58,6 +58,43 @@ def _quote_bare(text: str) -> str:
     )
 
 
+def _extract_json_object(text: str) -> str:
+    """Return the first balanced ``{...}`` object in ``text``.
+
+    Unlike ``find``/``rfind`` (which grab from the first ``{`` to the last
+    ``}`` and can swallow trailing prose or a second object), this walks the
+    string tracking brace depth while skipping quoted regions, stopping at the
+    first balanced close.
+    """
+    start = text.find("{")
+    if start == -1:
+        return text
+    depth = 0
+    quote = None
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+        i += 1
+    return text[start:]
+
+
 class Planner:
     def __init__(self, settings: Settings, llm, astbro, editor, verifier):
         self.settings = settings
@@ -126,9 +163,7 @@ class Planner:
         if text.startswith("```"):  # strip a ```json ... ``` fence
             text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
             text = re.sub(r"\s*\n?```$", "", text)
-        start, end = text.find("{"), text.rfind("}")  # isolate the first object
-        if start != -1 and end != -1:
-            text = text[start:end + 1]
+        text = _extract_json_object(text)
         for parser in (json.loads, _literal_dict):
             try:
                 return parser(text)
@@ -197,7 +232,15 @@ class Planner:
             return await self._edit(decision)
         if action == "verify":
             return self._verify(decision)
-        return {"action": "finish", "ok": True, "reason": decision.get("reason", "done")}
+        if action == "finish":
+            return {"action": "finish", "ok": True, "reason": decision.get("reason", "done")}
+        return {
+            "action": "finish",
+            "status": "error",
+            "ok": False,
+            "reason": f"unknown action: {action!r}",
+            "hint": "valid actions: navigate | read | edit | verify | finish",
+        }
 
     async def _navigate(self, decision: dict) -> dict:
         tool = decision.get("tool") or (

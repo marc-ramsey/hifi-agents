@@ -342,3 +342,27 @@ def test_parse_bare_keys_and_values():
         "ratio": -3.14,
         "label": "x",
     }
+
+
+def test_parse_extracts_first_balanced_object():
+    """Trailing prose and a second object must not be swallowed into the first.
+
+    A naive find/rfind would grab from the first ``{`` to the last ``}``,
+    merging them; the balanced scan stops at the first close.
+    """
+    text = 'here is {action: navigate, tool: map} then {"action": "finish"}'
+    assert Planner._parse(text) == {"action": "navigate", "tool": "map"}
+    # a brace inside a string value must not close the object early.
+    assert Planner._parse('{reason: "a}b", n: 1}') == {"reason": "a}b", "n": 1}
+
+
+async def test_unknown_action_finishes_as_error(planner):
+    """A hallucinated action is a terminal error, not a silent success."""
+    p, llm = planner
+    llm.responses = [json.dumps({"action": "frobnicate"})]
+    await p.seed("g", ".")
+    result = await p.tick()
+    assert result["action"] == "finish"
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert "unknown action" in result["reason"]

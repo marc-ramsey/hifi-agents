@@ -35,7 +35,7 @@ addopts = "-ra"
 
 [tool.coverage.run]
 branch = true
-source = ["hifi_search"]
+source = ["hifi_search", "hifi_code"]
 
 [tool.coverage.report]
 show_missing = true
