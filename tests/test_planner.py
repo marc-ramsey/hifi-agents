@@ -597,16 +597,23 @@ def test_parse_extracts_first_balanced_object():
     assert Planner._parse('{reason: "a}b", n: 1}') == {"reason": "a}b", "n": 1}
 
 
-async def test_unknown_action_finishes_as_error(planner):
-    """A hallucinated action is a terminal error, not a silent success."""
+async def test_invalid_action_rejected_not_silent_success(planner):
+    """A hallucinated action is rejected (ok=False) -- never a silent success.
+    The rejection is retryable: the loop reports ``invalid`` with a hint so the
+    model can self-correct, and the stall detector bounds a repeat loop."""
     p, llm = planner
-    llm.responses = [json.dumps({"action": "frobnicate"})]
+    llm.responses = [
+        json.dumps({"action": "frobnicate"}),
+        json.dumps({"action": "finish", "reason": "done"}),
+    ]
     await p.seed("g", ".")
     result = await p.tick()
-    assert result["action"] == "finish"
+    assert result["status"] == "invalid"
     assert result["ok"] is False
-    assert result["status"] == "error"
     assert "unknown action" in result["reason"]
+    # retryable: a valid action on the next tick completes the loop.
+    r2 = await p.tick()
+    assert r2["action"] == "finish" and r2["ok"] is True
 
 
 class _FakeSubAstBro:
@@ -712,3 +719,61 @@ async def test_plan_runs_subgoals_concurrently(planner):
     release.set()
     result = await task
     assert len(result["subgoals"]) == 2
+
+
+async def test_invalid_action_rejected_not_dispatched(planner):
+    """A decision with an unknown action is rejected before dispatch, with a
+    specific reason and hint; the model can then retry with a valid one."""
+    p, llm = planner
+    llm.responses = [
+        json.dumps({"action": "run"}),
+        json.dumps({"action": "finish", "reason": "done"}),
+    ]
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["status"] == "invalid"
+    assert "unknown action" in r1["reason"]
+    assert "navigate" in r1["hint"]
+    r2 = await p.tick()
+    assert r2["action"] == "finish" and r2["ok"] is True
+
+
+async def test_missing_required_field_rejected(planner):
+    p, llm = planner
+    llm.responses = [json.dumps({"action": "navigate"})]  # no tool
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["status"] == "invalid"
+    assert "missing required field 'tool'" in r1["reason"]
+
+
+async def test_invalid_decision_reaches_model_in_history(planner):
+    """A rejected decision is recorded in history as an assistant message, so
+    the model sees the rejection on the next tick and can self-correct."""
+    p, _ = planner
+    cap = _CaptureMessagesLLM([
+        json.dumps({"action": "bogus"}),
+        json.dumps({"action": "finish", "reason": "done"}),
+    ])
+    p.llm = cap
+    await p.seed("g", ".")
+    r1 = await p.tick()
+    assert r1["status"] == "invalid"
+    r2 = await p.tick()
+    assert r2["action"] == "finish"
+    tick2_messages = cap.messages[1]
+    assistant_msgs = [m for m in tick2_messages if m["role"] == "assistant"]
+    assert any("unknown action" in m["content"] for m in assistant_msgs)
+
+
+async def test_repeated_invalid_decisions_stall(planner):
+    """Re-submitting an invalid decision is stagnation and eventually stalls
+    the loop rather than spinning to the step budget."""
+    p, llm = planner
+    p.settings.max_stalls = 3
+    llm.responses = [json.dumps({"action": "bogus"})]  # repeated every tick
+    await p.seed("g", ".")
+    for _ in range(3):
+        r = await p.tick()
+    assert r["action"] == "finish"
+    assert r["status"] == "stalled"

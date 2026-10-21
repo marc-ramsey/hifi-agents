@@ -57,6 +57,9 @@ Rules for both:
 
 A rejected edit is feedback, not a dead end. The result carries a `reason`:
 
+- `"invalid decision"` → the action or its fields didn't match the schema; the
+  `hint` lists the valid actions. Fix the decision and retry.
+
 - `"old text not found"` → re-read the file/symbol, then retry with exact text.
 - `"not unique"` → include more surrounding lines to disambiguate.
 - `"invalid Python"` → your `new` broke syntax; fix and retry.

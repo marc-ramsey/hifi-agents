@@ -8,6 +8,7 @@ if the prompt stops reading SKILL.md the whole thing breaks.
 from pathlib import Path
 
 from hifi_code.prompt import _strip_frontmatter, system_prompt
+from hifi_code.schema import _REQUIRED, Action
 
 _SKILL_PATH = (
     Path(__file__).resolve().parent.parent
@@ -49,3 +50,16 @@ def test_prompt_carries_plan_and_create_file_guidance():
     assert "plan" in prompt
     assert "disjoint" in prompt
     assert "empty `old`" in prompt
+
+
+def test_prompt_matches_schema_actions_and_fields():
+    # The schema (schema.py) is the enforcement layer; SKILL.md (the prompt) is
+    # the contract the model reads. They must agree on the action vocabulary and
+    # the required field names, or the model is told something the loop won't
+    # accept -- which is exactly the drift this guard catches.
+    prompt = system_prompt("Add feature X")
+    for action in Action.ALL:
+        assert action in prompt, f"{action} missing from prompt"
+    for fields in _REQUIRED.values():
+        for field in fields:
+            assert field in prompt, f"{field!r} missing from prompt"

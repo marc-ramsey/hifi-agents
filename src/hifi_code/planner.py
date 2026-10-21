@@ -19,6 +19,7 @@ from .config import Settings
 from .editor import Edit, Editor
 from .prompt import system_prompt
 from .sandbox import Sandbox
+from .schema import Action, SchemaError, validate_decision
 from .verify import Verifier
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,28 @@ class Planner:
                 "reason": f"llm turn failed: {exc}",
                 "hint": "check the LLM endpoint and model availability",
             }
+        try:
+            validate_decision(decision)
+        except SchemaError as exc:
+            # The decision parsed but violated the action schema (unknown action,
+            # missing required field, or wrong type). Reject it before dispatch
+            # so the contract is enforced, not just advised, and record the
+            # rejection so the model sees it and can self-correct. The stall
+            # budget still bounds a repeat loop.
+            decision = {
+                "action": decision.get("action"),
+                "status": "invalid",
+                "ok": False,
+                "reason": f"invalid decision: {exc}",
+                "hint": "valid actions: " + " | ".join(Action.ALL),
+            }
+            self.state["history"].append({
+                "step": self.step, "action": decision["action"],
+                "decision": decision, "result": decision,
+            })
+            if self._stalled(decision["action"], decision):
+                return self._stalled_finish()
+            return decision
         action = decision.get("action", "finish")
         try:
             result = await self._dispatch(action, decision)
@@ -214,16 +237,7 @@ class Planner:
             "decision": decision, "result": result,
         })
         if self._stalled(action, result):
-            return {
-                "action": "finish",
-                "status": "stalled",
-                "ok": False,
-                "reason": (f"no progress for {self.settings.max_stalls} "
-                           f"consecutive steps"),
-                "hint": ("the loop is repeating itself or edits keep failing "
-                         "verify; re-check the goal, the target file, and the "
-                         "verify command"),
-            }
+            return self._stalled_finish()
         return result
 
     async def _dispatch(self, action: str, decision: dict) -> dict:
@@ -574,6 +588,19 @@ class Planner:
         """
         from .astbro import AstBro
         return AstBro(cmd=self.settings.server_cmd)
+
+    def _stalled_finish(self) -> dict:
+        """Terminal stalled-finish result shared by the stall detectors."""
+        return {
+            "action": "finish",
+            "status": "stalled",
+            "ok": False,
+            "reason": (f"no progress for {self.settings.max_stalls} "
+                       f"consecutive steps"),
+            "hint": ("the loop is repeating itself or edits keep failing "
+                     "verify; re-check the goal, the target file, and the "
+                     "verify command"),
+        }
 
     def _stalled(self, action: str, result: dict) -> bool:
         """True once the loop has made no meaningful progress for ``max_stalls``
