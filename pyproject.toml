@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hifi-search"
 version = "0.2.0"
-description = "SearXNG persistent memory agent — SQLite + numpy"
+description = "HiFi memory-backed search agent"
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp",
