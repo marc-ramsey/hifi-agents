@@ -37,6 +37,8 @@ An edit is a list of `{edits: [...]}`. Two shapes:
   inside a symbol. The harness fetches the exact source via `show`, so you never
   reproduce a file body from memory.
 - **Exact block:** `{path, old, new}` — replaces one exact block in a file.
+  To CREATE a brand-new file, use an empty `old` and put the entire new
+  file content in `new`.
 
 Rules for both:
 
@@ -64,8 +66,16 @@ Do not guess or re-submit the same text. Re-read, adjust, retry. After
 `max_stalls` (12) consecutive ticks with no progress (no applied edit, no
 passing verify) the loop exits with a `stalled` finish.
 
+## Parallel goals
+
+For a multi-file goal, use `plan` with one subgoal per file. The paths MUST be
+disjoint (no two subgoals share a file) so the harness can run them safely in
+parallel and concatenate the results.
+
 ## Tools
 
+- `plan`: `{subgoals:[{goal, path}]}` — decompose a multi-file goal into
+  parallel subtasks; each targets a DIFFERENT file path (disjoint).
 - `navigate`: ast-bro analysis tools — `map`, `digest`, `search`, `callers`,
   `callees`, `impact`, `context`, `surface`, `find_related`, `implements`.
 - `read`: pull a symbol's full source body (`show`).
