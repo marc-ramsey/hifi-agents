@@ -32,6 +32,17 @@ def test_verify_fail_on_tests():
     assert res["checks"][0]["ok"] is False
 
 
+def test_verify_pytest_no_tests_is_ok():
+    # pytest exit code 5 means "no tests were collected" — not a failure.
+    def runner(cmd):
+        return FakeProc(5, "no tests ran in 0.00s")
+
+    v = Verifier(runner=runner)
+    res = v.verify(VerifyConfig(run_tests=True, run_lint=False))
+    assert res["ok"] is True
+    assert res["checks"][0]["ok"] is True
+
+
 def test_verify_composes_tests_and_lint():
     calls = []
 

@@ -34,11 +34,18 @@ class Verifier:
         proc = self._runner(cmd)
         output = proc.stdout or proc.stderr or ""
         lines = [line for line in output.splitlines() if line.strip()]
+        returncode = proc.returncode
+        # pytest exit code 5 means "no tests were collected" — that is not a
+        # failure. On a project with no tests, treat it as ok so the loop isn't
+        # permanently unable to report progress.
+        ok = returncode == 0
+        if cmd and cmd[0].split("/")[-1].endswith("pytest") and returncode == 5:
+            ok = True
         return VerifyResult(
             name=cmd[0],
-            ok=proc.returncode == 0,
+            ok=ok,
             summary="\n".join(lines[-5:]),
-            returncode=proc.returncode,
+            returncode=returncode,
             output=output,
         )
 
