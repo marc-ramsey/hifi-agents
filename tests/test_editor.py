@@ -60,3 +60,31 @@ def test_diff_accumulates(tmp_path):
     diffs = editor.diff()
     assert len(diffs) == 2
     assert diffs[0]["new"] == "A"
+
+
+def test_apply_rejects_breaking_syntax(tmp_path):
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n")
+    editor = Editor()
+    # 'return 1' is unique; 'return 1 +' leaves a trailing operator -> SyntaxError.
+    res = editor.apply(Edit(str(f), "return 1", "return 1 +"))
+    assert res["status"] == "rejected"
+    assert "invalid Python" in res["reason"]
+    assert f.read_text() == "def f():\n    return 1\n"  # untouched, not written
+
+
+def test_apply_accepts_edit_that_keeps_valid_syntax(tmp_path):
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n")
+    editor = Editor()
+    res = editor.apply(Edit(str(f), "return 1", "return 2"))
+    assert res["status"] == "applied"
+    assert f.read_text() == "def f():\n    return 2\n"
+
+
+def test_apply_ignores_non_python_files(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("return 1\n")
+    editor = Editor()
+    res = editor.apply(Edit(str(f), "return 1", "return 1 +"))
+    assert res["status"] == "applied"  # .py check is skipped for non-Python

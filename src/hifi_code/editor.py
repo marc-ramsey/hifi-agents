@@ -6,6 +6,9 @@ disk; the cumulative diff is surfaced instead for review.
 """
 
 
+import ast
+
+
 class Edit:
     def __init__(self, path: str, old: str, new: str):
         self.path = path
@@ -43,12 +46,30 @@ class Editor:
                     "reason": f"old text not unique (found {content.count(edit.old)} times)",
                     "edit": edit.to_dict()}
 
+        original = content
         content = content.replace(edit.old, edit.new)
+
+        if (edit.path.endswith(".py")
+                and self._is_valid_py(original)
+                and not self._is_valid_py(content)):
+            return {"status": "rejected",
+                    "reason": "edit produced invalid Python",
+                    "edit": edit.to_dict()}
+
         with open(edit.path, "w", encoding="utf-8") as fh:
             fh.write(content)
 
         self._applied.append(edit)
         return {"status": "applied", "edit": edit.to_dict()}
+
+    @staticmethod
+    def _is_valid_py(text: str) -> bool:
+        """True if ``text`` parses as valid Python syntax."""
+        try:
+            ast.parse(text)
+        except SyntaxError:
+            return False
+        return True
 
     def diff(self) -> list[dict]:
         """Cumulative list of every proposed + applied edit."""
