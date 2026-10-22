@@ -111,6 +111,13 @@ class AstBro:
     async def search(self, query, **kwargs) -> dict:
         return await self.call("search", {"query": query, **kwargs})
 
+    async def index(self, paths=None, **kwargs) -> dict:
+        # Build the per-repo search index used by ``search`` / ``find_related``.
+        # Idempotent and safe in an existing repo; the index may be empty. The
+        # loop calls this once at seed time so semantic search works without the
+        # model having to emit an explicit init action.
+        return await self.call("index", {"paths": paths, **kwargs})
+
     async def impact(self, target, **kwargs) -> dict:
         return await self.call("impact", {"target": target, **kwargs})
 

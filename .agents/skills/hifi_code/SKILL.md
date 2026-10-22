@@ -16,6 +16,10 @@ Every tick the model emits one JSON action: `navigate | read | edit | verify |
 finish`. The loop enforces a step budget and a stall detector, so finish as
 soon as the goal is met and verify passes.
 
+Before the first tick the loop automatically builds the ast-bro search index, so
+`search` and `find_related` work without any action from you. Do not emit an
+`init` action — it is handled for you.
+
 ## Required JSON shape
 
 Copy these field names **exactly** — the harness rejects any action whose fields

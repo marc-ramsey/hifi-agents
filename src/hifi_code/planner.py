@@ -117,6 +117,14 @@ class Planner:
 
     async def seed(self, goal: str, root: str = "."):
         self.goal = goal
+        # Build the ast-bro search index once before the first tick so `search`
+        # / `find_related` work. Idempotent and safe in an existing repo; the
+        # index may be empty. This runs unconditionally (not a model action) so
+        # semantic search needs no explicit init and can't be missed.
+        try:
+            await self.astbro.index(paths=[root])
+        except Exception as exc:  # noqa: BLE001 - search is best-effort
+            logger.debug("ast-bro index build failed at seed: %s", exc)
         self.state["map"] = await self.astbro.digest(paths=[root])
         self.state["tools"] = [t["name"] for t in await self.astbro.list_tools()]
         return self.state["map"]
