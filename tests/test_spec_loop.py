@@ -5,10 +5,11 @@ so a scripted driver drives it here while the real input()-based driver (CliDriv
 is exercised by hand. The seam test feeds a resolved spec's goal into a *real*
 inner Planner to prove the two loops connect.
 
-Note on the schema: ``events``/``state``/``transitions``/``acceptance`` are
-required with no default, so an empty instance never resolves -- the loop must
-fill them (or the user does) before validation passes. ``side_effects``/``outputs``
-are required *with* a default (``[]``) and are materialized by the loop.
+Note on the schema: ``events``/``state``/``trigger``/``data_model``/``transitions``/
+``modules``/``seams``/``inputs``/``acceptance`` are required with no default, so an
+empty instance never resolves -- the loop must fill them (or the user does) before
+validation passes. ``side_effects``/``outputs`` are required *with* a default (``[]``)
+and are materialized by the loop.
 """
 
 import json
@@ -59,7 +60,11 @@ def _full_edit():
     return DraftOutcome(instance={
         "events": ["OrderPlaced"],
         "state": ["order: pending -> paid"],
+        "trigger": "HTTP request arrives",
+        "data_model": ["order: id: int, total: decimal, status: str"],
         "transitions": ["OrderPlaced -> order: paid"],
+        "modules": ["domain/", "adapters/", "main.py"],
+        "seams": ["Store protocol"],
         "inputs": ["order payload"],
         "acceptance": ["order persisted and email sent"],
     })
@@ -113,7 +118,11 @@ async def test_cli_driver_normalizes_list_values():
     answers = iter([
         "edit", "events", "OrderPlaced, EmailSent",
         "edit", "state", "order: pending -> paid",
+        "edit", "trigger", "HTTP request arrives",
+        "edit", "data_model", "order: id: int, total: decimal, status: str",
         "edit", "transitions", "OrderPlaced -> order: paid",
+        "edit", "modules", "domain/, adapters/, main.py",
+        "edit", "seams", "Store protocol",
         "edit", "inputs", "order payload",
         "edit", "acceptance", "order persisted",
         "resolve", "y",

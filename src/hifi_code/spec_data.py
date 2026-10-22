@@ -1,10 +1,12 @@
 """The default spec: a data/event-driven application.
 
 This is the concrete schema an outer loop fills in with the user. It encodes the
-methodology -- infer events, state, transitions, and side effects, and only those
--- as a set of fields with required/default annotations the renderer and
-validator key off. Fields are ordered so the draft reads in real-time order:
-events -> state -> transitions -> side effects -> inputs/outputs -> constraints.
+methodology -- infer events, state, transitions, and side effects, plus the
+structural skeleton (entry point, data model, modules, seams) needed to start
+organizing code -- as a set of fields with required/default annotations the
+renderer and validator key off. Fields are ordered so the draft reads in
+real-time order:
+events -> state -> trigger -> data_model -> transitions -> modules -> seams -> side effects -> inputs/outputs -> constraints.
 """
 
 from .spec_schema import FieldSpec, Group, Kind, SpecSchema
@@ -21,8 +23,24 @@ DATA_EVENT_SPEC = SpecSchema(
             description="entities and the states each can be in",
         ),
         FieldSpec(
+            name="trigger", kind=Kind.SCALAR, group=Group.VOCABULARY, required=True,
+            description="what starts the first event -- the entry point, e.g. HTTP request arrives, server starts, user runs CLI",
+        ),
+        FieldSpec(
+            name="data_model", kind=Kind.LIST, group=Group.VOCABULARY, required=True,
+            description="entity attributes and types, e.g. Order: id: int, total: decimal, status: str",
+        ),
+        FieldSpec(
             name="transitions", kind=Kind.LIST, group=Group.TRANSITIONS, required=True,
             description="for each event: what state it changes and to what",
+        ),
+        FieldSpec(
+            name="modules", kind=Kind.LIST, group=Group.STRUCTURE, required=True,
+            description="file/module skeleton to lay out, e.g. adapters/, domain/, main.py",
+        ),
+        FieldSpec(
+            name="seams", kind=Kind.LIST, group=Group.STRUCTURE, required=True,
+            description="interfaces between modules / testable boundaries, e.g. Store protocol",
         ),
         FieldSpec(
             name="side_effects", kind=Kind.LIST, group=Group.OUTPUT, required=True,
@@ -42,7 +60,7 @@ DATA_EVENT_SPEC = SpecSchema(
         FieldSpec(
             name="constraints", kind=Kind.LIST, group=Group.CONSTRAINTS, required=False,
             default=[],
-            description="non-functional: perf, security, retention, do-not-touch",
+            description="non-functional: perf, security, retention, do-not-touch, and system boundary (what's in vs. out)",
         ),
         FieldSpec(
             name="edge_cases", kind=Kind.LIST, group=Group.CONSTRAINTS, required=False,

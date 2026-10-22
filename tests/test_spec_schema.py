@@ -16,7 +16,11 @@ def _full_instance() -> dict:
     return {
         "events": ["OrderPlaced"],
         "state": ["order: pending -> paid"],
+        "trigger": "HTTP request arrives",
+        "data_model": ["order: id: int, total: decimal, status: str"],
         "transitions": ["OrderPlaced -> order: paid"],
+        "modules": ["domain/", "adapters/", "main.py"],
+        "seams": ["Store protocol"],
         "side_effects": ["send confirmation email"],
         "inputs": ["order payload"],
         "outputs": ["201 created"],
@@ -56,6 +60,30 @@ def test_render_draft_flags_gaps_as_assumptions():
 def test_render_draft_marks_unblockable_gap():
     draft = DATA_EVENT_SPEC.render_draft({})
     assert "- `events`: **NEEDS INPUT**" in draft
+
+
+def test_render_draft_flags_structural_gaps_as_needs_input():
+    # Structural preconditions (trigger/data_model/modules/seams) are required with
+    # no default, so an empty instance flags them as NEEDS INPUT rather than
+    # silently assuming them -- the draft front-loads the skeleton.
+    draft = DATA_EVENT_SPEC.render_draft({})
+    for name in ("trigger", "data_model", "modules", "seams"):
+        assert f"- `{name}`: **NEEDS INPUT**" in draft
+
+
+def test_render_prompt_lists_structural_fields():
+    # STRUCTURE group renders its fields grouped correctly.
+    prompt = DATA_EVENT_SPEC.render_prompt()
+    for name in ("modules", "seams"):
+        assert f"- `{name}`:" in prompt
+    assert "## Structure" in prompt
+
+
+def test_validate_instance_requires_structural_fields():
+    for name in ("trigger", "data_model", "modules", "seams"):
+        bad = _full_instance()
+        del bad[name]
+        assert any(name in e for e in DATA_EVENT_SPEC.validate_instance(bad))
 
 
 def test_render_draft_echoes_filled_fields():

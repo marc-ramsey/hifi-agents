@@ -49,8 +49,9 @@ class Group(str, Enum):
     """Which prompt section a field renders into -- the renderer's key."""
 
     VOCABULARY = "vocabulary"
-    OUTPUT = "output"
     TRANSITIONS = "transitions"
+    STRUCTURE = "structure"
+    OUTPUT = "output"
     CONSTRAINTS = "constraints"
 
 
