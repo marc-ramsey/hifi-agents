@@ -6,6 +6,8 @@ import logging
 import sys
 
 from .config import Settings
+from .spec_data import DATA_EVENT_SPEC
+from .spec_loop import CliDriver, run_outer
 from .transports.mcp import MCPAdapter
 from .transports.stdio import run
 
@@ -20,6 +22,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="ast-bro-driven coding loop")
     parser.add_argument("goal", nargs="?", help="Coding goal (stdio mode)")
+    parser.add_argument("--outer", action="store_true",
+                        help="draft a spec interactively, then run the inner loop")
     parser.add_argument("--transport", choices=["stdio", "mcp"],
                         default="stdio", help="I/O transport")
     parser.add_argument("--root", default=".", help="Codebase root to seed from")
@@ -31,7 +35,10 @@ def main():
     if args.max_steps is not None:
         settings.max_steps = args.max_steps
 
-    if args.transport == "mcp":
+    if args.outer:
+        asyncio.run(run_outer(settings, DATA_EVENT_SPEC,
+                              CliDriver(DATA_EVENT_SPEC), args.root))
+    elif args.transport == "mcp":
         adapter = MCPAdapter(settings)
         logger.info("Starting hifi_code MCP server (stdio)...")
         asyncio.run(adapter.run())

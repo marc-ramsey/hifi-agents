@@ -8,7 +8,7 @@ the generated prompt changes with it.
 """
 
 from hifi_code.spec_data import DATA_EVENT_SPEC
-from hifi_code.spec_schema import Group, Kind, State
+from hifi_code.spec_schema import Group, State
 
 
 def _full_instance() -> dict:
@@ -84,6 +84,15 @@ def test_validate_instance_defaulted_fields_are_optional_in_resolved():
     # may omit them.
     inst = _full_instance()
     for opt in ("constraints", "edge_cases", "assumptions"):
+        del inst[opt]
+    assert DATA_EVENT_SPEC.validate_instance(inst) == []
+
+
+def test_validate_instance_required_defaulted_fields_are_optional_in_resolved():
+    # side_effects / outputs are required *with* a default ([]); leaving them
+    # empty is a defaultable gap, not a blocker.
+    inst = _full_instance()
+    for opt in ("side_effects", "outputs"):
         del inst[opt]
     assert DATA_EVENT_SPEC.validate_instance(inst) == []
 

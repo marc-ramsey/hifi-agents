@@ -159,7 +159,12 @@ class SpecSchema(BaseModel):
                 continue
             val = instance.get(f.name)
             if f.is_empty(val):
-                errors.append(f"missing required field {f.name!r}")
+                # A required field with a default is a *defaultable* gap: leaving
+                # it empty is fine (the default applies), so only a required field
+                # with no default is a genuine blocker. An empty list counts as
+                # empty here, so a ``[]`` default is not rejected.
+                if f.default is None:
+                    errors.append(f"missing required field {f.name!r}")
                 continue
             if f.kind == Kind.LIST and not isinstance(val, list):
                 errors.append(f"{f.name!r} must be list")
