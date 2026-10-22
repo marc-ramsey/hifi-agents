@@ -177,6 +177,124 @@ async def test_verify_failure_increments_stall_and_stops(planner):
     assert r["status"] == "stalled"
 
 
+async def test_revise_suggested_after_repeated_verify_failures(planner):
+    """Three failing verifies with no fix in between flags suggest_revise.
+
+    This is the revise policy signal: a single failing verify is normal, but
+    repeated unfixing failures mean the loop cannot fix the problem by editing,
+    so the spec is likely wrong. The flag is a suggestion to the next prompt, not
+    a terminal stop -- the loop keeps running.
+    """
+    p, llm = planner
+    async def fake_verify(cfg=None):
+        return {"ok": False, "reason": "still failing"}
+    p.verifier.verify = fake_verify
+    llm.responses = [json.dumps({"action": "verify"})]
+    await p.seed("g", ".")
+
+    await p.tick()
+    assert p.state["verify_failures"] == 1
+    assert p.state["suggest_revise"] is False
+
+    await p.tick()
+    assert p.state["verify_failures"] == 2
+    assert p.state["suggest_revise"] is False
+
+    r = await p.tick()
+    assert p.state["verify_failures"] == 3
+    assert p.state["suggest_revise"] is True
+    assert r["ok"] is False  # still the verify result, not a terminal stop
+
+
+async def test_applied_edit_resolves_revise_signal(planner, tmp_path):
+    """An applied edit is progress, so it clears the revise signal even after
+    prior failing verifies -- ordinary code fixes never trigger a revise."""
+    target = tmp_path / "a.py"
+    target.write_text("x = 1\n")
+    p, llm = planner
+    async def fake_verify(cfg=None):
+        return {"ok": False, "reason": "failing"}
+    p.verifier.verify = fake_verify
+    edit = json.dumps({
+        "action": "edit",
+        "edits": [{"path": str(target), "old": "x = 1", "new": "x = 2"}],
+    })
+    llm.responses = [json.dumps({"action": "verify"})] * 3 + [edit]
+    await p.seed("g", ".")
+
+    for _ in range(3):
+        await p.tick()
+    assert p.state["suggest_revise"] is True
+
+    r = await p.tick()  # the applied edit resets the counter
+    assert r["edits"][0]["status"] == "applied"
+    assert p.state["verify_failures"] == 0
+    assert p.state["suggest_revise"] is False
+
+
+async def test_passing_verify_resolves_revise_signal(planner):
+    """A passing verify is progress and clears the revise signal."""
+    p, llm = planner
+    calls = {"n": 0}
+
+    async def fake_verify(cfg=None):
+        calls["n"] += 1
+        return {"ok": calls["n"] >= 3}  # passes on the third call
+    p.verifier.verify = fake_verify
+    llm.responses = [json.dumps({"action": "verify"})]
+    await p.seed("g", ".")
+
+    await p.tick()
+    await p.tick()
+    assert p.state["suggest_revise"] is False
+    r = await p.tick()
+    assert r["ok"] is True
+    assert p.state["suggest_revise"] is False
+
+
+async def test_revise_hint_injected_into_prompt(planner):
+    """When the flag is set, the next prompt carries a concrete revise nudge."""
+    p, llm = planner
+    llm.responses = [json.dumps({"action": "verify"})]
+    seen = []
+
+    class _RecordLLM:
+        async def chat(self, messages):
+            # the user message is the last entry the planner appends
+            seen.append(messages[-1]["content"])
+            return llm.responses[0]
+
+    async def fake_verify(cfg=None):
+        return {"ok": False, "reason": "failing"}
+
+    p.llm = _RecordLLM()
+    p.verifier.verify = fake_verify
+    await p.seed("g", ".")
+
+    await p.tick()  # failure 1
+    await p.tick()  # failure 2
+    await p.tick()  # failure 3 -> flag set after this tick
+    assert "revise" not in seen[2]  # 3rd prompt, flag not yet set (threshold 3)
+    await p.tick()  # failure 4 -> 4th prompt carries the hint
+    prompt = seen[3]
+    assert "revise" in prompt
+    assert "verify has failed" in prompt
+
+
+async def test_revise_threshold_is_configurable():
+    """The threshold is a setting, not a hardcoded constant."""
+    settings = Settings(max_steps=40, max_stalls=12, revise_threshold=1,
+                        sandbox_enabled=False, denylist=[])
+    llm = FakeLLM([json.dumps({"action": "verify"})])
+    p = Planner(settings, llm, FakeAstBro(), Editor(), Verifier())
+    async def fake_verify(cfg=None):
+        return {"ok": False}
+    p.verifier.verify = fake_verify
+    await p.seed("g", ".")
+    await p.tick()
+    assert p.state["suggest_revise"] is True  # threshold of 1 fires immediately
+
+
 async def test_edit_applies_then_verify(planner, tmp_path):
     target = tmp_path / "a.py"
     target.write_text("x = 1\n")

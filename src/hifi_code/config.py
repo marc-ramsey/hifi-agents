@@ -47,6 +47,12 @@ class Settings(BaseModel):
     # no meaningful progress (no applied edit, no passing verify). Prevents the
     # loop from spinning forever on repeated reads or re-submitted edits.
     max_stalls: int = 12
+    # After this many consecutive verify failures with no applied edit or passing
+    # verify in between, the loop suggests `revise` (the spec's structural
+    # assumptions may be wrong) rather than letting the model burn its step budget
+    # flailing on the same failure. It is a suggestion to the model, not an
+    # auto-revise -- ordinary code fixes reset the counter by applying an edit.
+    revise_threshold: int = 3
     working_dir: str = "."
     sandbox_enabled: bool = True
     denylist: list[str] = Field(default_factory=list)

@@ -114,6 +114,8 @@ class Planner:
             "history": [],
             "last_verify": None,
             "stall": 0,
+            "verify_failures": 0,
+            "suggest_revise": False,
         }
 
     async def seed(self, goal: str, root: str = "."):
@@ -165,12 +167,21 @@ class Planner:
                 self.goal, self._map_text(self.state["map"]), tools=tools)},
         ]
         messages.extend(self._history_messages(self.state["history"]))
-        messages.append(
-            {"role": "user", "content": (
-                f"Step {self.step}. Goal: {self.goal}. "
-                "Choose the next action; respond with JSON only."
-            )}
+        user = (
+            f"Step {self.step}. Goal: {self.goal}. "
+            "Choose the next action; respond with JSON only."
         )
+        if self.state.get("suggest_revise"):
+            # A concrete, heuristic-driven nudge: repeated unfixing verify failures
+            # are the canonical "the spec is wrong" moment. Surface it so the model
+            # can `revise` the offending field instead of burning the step budget.
+            user += (
+                f" Note: verify has failed {self.state['verify_failures']} times "
+                "without a passing result or an applied edit. If this points to a "
+                "wrong or unmodeled spec assumption (a structural gap), emit "
+                "`revise` to re-draft that field; otherwise keep fixing the code."
+            )
+        messages.append({"role": "user", "content": user})
         content = await self.llm.chat(messages)
         return self._parse(content)
 
@@ -254,6 +265,7 @@ class Planner:
             "step": self.step, "action": action,
             "decision": decision, "result": result,
         })
+        self._update_revise_signal(action, result)
         if self._stalled(action, result):
             return self._stalled_finish()
         return result
@@ -665,6 +677,38 @@ class Planner:
                      "verify; re-check the goal, the target file, and the "
                      "verify command"),
         }
+
+    def _update_revise_signal(self, action: str, result: dict) -> None:
+        """Track whether the loop is stuck failing verify without converging.
+
+        This is the policy signal behind the `revise` back-channel: a single
+        failing verify is normal (edit, verify, fix more), but ``revise_threshold``
+        consecutive failing verifies with no applied edit or passing verify in
+        between means the loop cannot fix the problem by editing -- the spec's
+        structural assumptions (trigger/data_model/modules/seams) are likely wrong.
+        When the counter crosses the threshold we flag ``suggest_revise`` so the
+        next prompt carries a concrete suggestion to `revise` that field. It is
+        only a suggestion -- the model still decides -- and ordinary code fixes
+        keep the counter at zero by applying an edit or passing verify, so the gate
+        fires on structural stuckness, not every code fix.
+
+        The counter grows only on a failing verify and resets on a passing verify
+        or an applied edit; other actions leave it untouched.
+        """
+        if action == "verify":
+            if result.get("ok"):
+                self.state["verify_failures"] = 0
+                self.state["suggest_revise"] = False
+            else:
+                self.state["verify_failures"] += 1
+                self.state["suggest_revise"] = (
+                    self.state["verify_failures"] >= self.settings.revise_threshold
+                )
+        elif action == "edit" and any(
+            e.get("status") == "applied" for e in result.get("edits", [])
+        ):
+            self.state["verify_failures"] = 0
+            self.state["suggest_revise"] = False
 
     def _stalled(self, action: str, result: dict) -> bool:
         """True once the loop has made no meaningful progress for ``max_stalls``

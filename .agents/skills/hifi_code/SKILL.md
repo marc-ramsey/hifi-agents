@@ -53,6 +53,11 @@ tool name (for example `"tool": "map"`). Do **not** write `{ "map": {...} }`.
    the build). `revise` hands control back to the outer loop to re-draft that
    one field and re-seeds you with the updated goal; it is not success. Do not
    `revise` for ordinary code fixes -- fix the code.
+
+   A reliable trigger: if `verify` fails 3 times in a row with no applied edit
+   or passing verify in between, the loop will suggest `revise` -- that pattern
+   means you can't fix it by editing, so the spec is likely wrong. Otherwise keep
+   fixing the code.
 7. **Finish** only when the goal is met *and* verify passes.
 
 ## Editing: prefer symbol-scoped edits
