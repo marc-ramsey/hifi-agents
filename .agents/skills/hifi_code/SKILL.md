@@ -13,8 +13,8 @@ it to keep edits compact, safe, and correct.
 ## The loop
 
 Every tick the model emits one JSON action: `navigate | read | edit | verify |
-finish`. The loop enforces a step budget and a stall detector, so finish as
-soon as the goal is met and verify passes.
+revise | finish`. The loop enforces a step budget and a stall detector, so finish
+as soon as the goal is met and verify passes.
 
 Before the first tick the loop automatically builds the ast-bro search index, so
 `search` and `find_related` work without any action from you. Do not emit an
@@ -29,6 +29,7 @@ of the literal field `tool`.
 - `navigate`: `{ "action": "navigate", "tool": "<map|digest|search|callers|callees|impact|context|surface|find_related|implements>", "path": "<file or symbol>" }`
 - `read`: `{ "action": "read", "path": "<file or symbol>" }`
 - `edit`: `{ "action": "edit", "edits": [ { "path": "<file>", "old": "<exact source>", "new": "<replacement>" } ] }`
+- `revise`: `{ "action": "revise", "field": "<spec field>", "op": "<add|remove|replace>", "value": "<new value>" }`
 - `verify`: `{ "action": "verify" }`
 - `finish`: `{ "action": "finish" }`
 
@@ -46,7 +47,13 @@ tool name (for example `"tool": "map"`). Do **not** write `{ "map": {...} }`.
    step most often skipped and most worth doing for a generation task.
 4. **Edit surgically.** Submit the smallest possible edit (see below).
 5. **Verify.** Run `verify` (tests + lint) after any change.
-6. **Finish** only when the goal is met *and* verify passes.
+6. **Revise** the spec with `revise` when a failure means the *spec* is wrong, not
+   just the code -- a structural contradiction or a gap the spec couldn't model
+   (e.g. `trigger`, `data_model`, `modules`, `seams` were guessed and now break
+   the build). `revise` hands control back to the outer loop to re-draft that
+   one field and re-seeds you with the updated goal; it is not success. Do not
+   `revise` for ordinary code fixes -- fix the code.
+7. **Finish** only when the goal is met *and* verify passes.
 
 ## Editing: prefer symbol-scoped edits
 

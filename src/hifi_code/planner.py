@@ -20,6 +20,7 @@ from .editor import Edit, Editor
 from .prompt import system_prompt
 from .sandbox import Sandbox
 from .schema import Action, SchemaError, validate_decision
+from .spec_schema import RevisionAction
 from .verify import Verifier
 
 logger = logging.getLogger(__name__)
@@ -268,6 +269,8 @@ class Planner:
             return await self._plan(decision)
         if action == "verify":
             return await self._verify(decision)
+        if action == "revise":
+            return await self._revise(decision)
         if action == "finish":
             return {"action": "finish", "ok": True, "reason": decision.get("reason", "done")}
         return {
@@ -545,6 +548,37 @@ class Planner:
         self.state["last_verify"] = await self.verifier.verify(self.settings.verify)
         return self.state["last_verify"]
 
+    async def _revise(self, decision: dict) -> dict:
+        """Validate a revise request and return a terminal result for the outer loop.
+
+        The revise action is the back-channel that makes the spec a living
+        document: the inner loop emits one when it hits a structural
+        contradiction or an unmodeled gap, and the outer loop applies it and
+        re-seeds. ``validate_decision`` already enforced ``field``/``op``, so
+        this only guards ``op`` is a known mutation and returns the terminal
+        result the outer loop consumes. Unlike ``finish``, a revise is not
+        success or failure -- it is a request to re-draft -- so the outer loop
+        drives the next coding pass after applying it.
+        """
+        ops = (RevisionAction.ADD.value, RevisionAction.REMOVE.value,
+               RevisionAction.REPLACE.value)
+        op = decision.get("op")
+        if not decision.get("field") or op not in ops:
+            return {
+                "action": "revise",
+                "ok": False,
+                "reason": "revise needs a field and op (add|remove|replace)",
+                "hint": "valid ops: add | remove | replace",
+            }
+        return {
+            "action": "revise",
+            "field": decision.get("field"),
+            "op": op,
+            "value": decision.get("value"),
+            "reason": decision.get("reason", ""),
+            "ok": True,
+        }
+
     async def _plan(self, decision: dict) -> dict:
         """Drive a goal decomposition in parallel across disjoint paths.
 
@@ -643,6 +677,11 @@ class Planner:
         it as a terminal ``stalled`` finish instead of burning the whole step
         budget.
         """
+        if action == "revise":
+            # A revise is a deliberate re-plan, not stagnation -- reset the
+            # counter and return False so it is never masked as a stalled finish.
+            self.state["stall"] = 0
+            return False
         if action == "edit":
             if any(
                 e.get("status") == "applied" for e in result.get("edits", [])

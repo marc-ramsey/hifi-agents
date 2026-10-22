@@ -18,7 +18,8 @@ from hifi_code.config import Settings
 from hifi_code.editor import Editor
 from hifi_code.planner import Planner
 from hifi_code.spec_data import DATA_EVENT_SPEC
-from hifi_code.spec_loop import CliDriver, DraftOutcome, SpecLoop
+from hifi_code.spec_loop import CliDriver, DraftOutcome, SpecLoop, run_outer
+from hifi_code.spec_schema import RevisionAction, RevisionRequest
 from hifi_code.verify import Verifier
 
 
@@ -131,6 +132,85 @@ async def test_cli_driver_normalizes_list_values():
     resolved, goal = await _run(driver)
     assert resolved["events"] == ["OrderPlaced", "EmailSent"]
     assert "OrderPlaced" in goal
+
+
+# --- Revision: the spec is a living document -----------------------------
+
+
+async def test_revise_adds_replaces_and_removes_a_field():
+    loop = SpecLoop(DATA_EVENT_SPEC, ScriptedDriver([_full_edit(), _resolve()]))
+    resolved, _goal = await loop.run()
+    assert resolved["modules"] == ["domain/", "adapters/", "main.py"]
+
+    # ADD appends to a list field.
+    outcome = loop.revise(
+        RevisionRequest(field="modules", op=RevisionAction.ADD, value="tests/"))
+    assert not isinstance(outcome, list)
+    inst, goal = outcome
+    assert "tests/" in inst["modules"]
+    assert "domain/" in inst["modules"]
+    assert "domain/" in goal  # re-serialized into the new goal
+
+    # REPLACE swaps a scalar field's value.
+    inst, _ = loop.revise(
+        RevisionRequest(field="trigger", op=RevisionAction.REPLACE, value="CLI run"))
+    assert inst["trigger"] == "CLI run"
+
+    # REMOVE drops a value.
+    inst, _ = loop.revise(
+        RevisionRequest(field="modules", op=RevisionAction.REMOVE, value="tests/"))
+    assert "tests/" not in inst["modules"]
+
+
+async def test_revise_unknown_field_is_a_mechanism_error():
+    loop = SpecLoop(DATA_EVENT_SPEC, ScriptedDriver([_full_edit(), _resolve()]))
+    await loop.run()
+    # An unknown field can't be revised -- surface it, don't silently pass.
+    assert isinstance(loop.revise(
+        RevisionRequest(field="nope", op=RevisionAction.ADD, value="x")), list)
+
+
+async def test_run_outer_loops_on_revise_then_finishes(monkeypatch):
+    # The inner loop emits a revise request on its first pass; the outer loop
+    # applies it, re-seeds, and the second pass finishes. Proves the seam runs
+    # in reverse: inner -> outer -> inner.
+    from hifi_code.transports import stdio
+
+    calls = {"n": 0}
+
+    async def fake_drive(settings, goal, root):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            yield {"action": "revise", "field": "modules", "op": "add",
+                   "value": "services/", "reason": "need a services layer",
+                   "ok": True}
+        else:
+            yield {"action": "finish", "ok": True, "reason": "done"}
+
+    monkeypatch.setattr(stdio, "_drive", fake_drive)
+    driver = ScriptedDriver([_full_edit(), _resolve()])
+    goal = await run_outer(Settings(max_steps=2, sandbox_enabled=False,
+                                    denylist=[]), DATA_EVENT_SPEC, driver, root=".")
+    assert calls["n"] == 2  # re-seeded after the revise
+    assert "services/" in goal  # revision applied and re-serialized
+    assert "[spec revision] need a services layer" in goal  # reason threaded in
+
+
+async def test_run_outer_stops_on_failed_revision(monkeypatch):
+    # A revision that fails validation (unknown field) surfaces the error and
+    # returns None rather than handing a broken spec to the coding loop.
+    from hifi_code.transports import stdio
+
+    async def fake_drive(settings, goal, root):
+        yield {"action": "revise", "field": "nope", "op": "add",
+               "value": "x", "reason": "why", "ok": True}
+
+    monkeypatch.setattr(stdio, "_drive", fake_drive)
+    driver = ScriptedDriver([_full_edit(), _resolve()])
+    result = await run_outer(Settings(max_steps=2, sandbox_enabled=False,
+                                      denylist=[]), DATA_EVENT_SPEC, driver,
+                             root=".")
+    assert result is None
 
 
 # --- The seam: a resolved spec's goal drives a real inner Planner ----------

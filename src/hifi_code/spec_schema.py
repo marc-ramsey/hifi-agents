@@ -82,6 +82,39 @@ class FieldSpec(BaseModel):
         return value is None or (isinstance(value, list) and len(value) == 0)
 
 
+class RevisionAction(str, Enum):
+    """How a revision request mutates a committed spec field.
+
+    The mirror of :class:`State`: ``State`` moves a spec draft-to-resolved, while
+    ``RevisionAction`` mutates a committed field when the inner coding loop finds
+    the spec wrong or incomplete. Kept to the three list/scalar ops the loop can
+    apply mechanically (add / remove / replace) so a revision is always a
+    machine-checkable mutation, never a free-form rewrite.
+    """
+
+    ADD = "add"
+    REMOVE = "remove"
+    REPLACE = "replace"
+
+
+class RevisionRequest(BaseModel):
+    """A structured request to re-draft one committed spec field.
+
+    This is the back-channel that makes the spec a living document: the inner
+    coding loop emits one when it hits a structural contradiction or an
+    unmodeled gap, and the outer loop applies it and re-validates. ``field``
+    names a committed spec field; ``op`` says how to change it; ``value`` is the
+    new/added value for ``add``/``replace``. ``reason`` is the loop's
+    explanation, threaded back into the next goal so the coding loop sees why
+    the spec changed.
+    """
+
+    field: str
+    op: RevisionAction
+    value: Any = None
+    reason: str = ""
+
+
 class SpecSchema(BaseModel):
     """The full spec: a name and an ordered list of fields.
 

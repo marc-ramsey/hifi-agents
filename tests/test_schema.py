@@ -11,6 +11,7 @@ VALID = {
     "edit": {"action": "edit", "edits": [{"path": "x.py", "old": "a", "new": "b"}]},
     "plan": {"action": "plan", "subgoals": [{"goal": "g", "path": "x.py"}]},
     "verify": {"action": "verify"},
+    "revise": {"action": "revise", "field": "modules", "op": "add"},
     "finish": {"action": "finish", "reason": "done"},
 }
 
@@ -40,6 +41,14 @@ def test_edit_requires_edits_list():
     # A single-object edit ({path, old, new}) is not the schema; edits is a list.
     with pytest.raises(SchemaError, match="missing required field 'edits'"):
         validate_decision({"action": "edit", "path": "x.py", "old": "a", "new": "b"})
+
+
+def test_revise_requires_field_and_op():
+    # revise needs a field to re-draft and an op (add|remove|replace).
+    with pytest.raises(SchemaError, match="missing required field 'field'"):
+        validate_decision({"action": "revise", "op": "add"})
+    with pytest.raises(SchemaError, match="missing required field 'op'"):
+        validate_decision({"action": "revise", "field": "modules"})
 
 
 def test_nested_args_are_merged():

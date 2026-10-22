@@ -25,9 +25,10 @@ class Action:
     EDIT = "edit"
     PLAN = "plan"
     VERIFY = "verify"
+    REVISE = "revise"
     FINISH = "finish"
 
-    ALL = (NAVIGATE, READ, EDIT, PLAN, VERIFY, FINISH)
+    ALL = (NAVIGATE, READ, EDIT, PLAN, VERIFY, REVISE, FINISH)
 
 
 class SchemaError(ValueError):
@@ -43,6 +44,7 @@ _REQUIRED: dict[str, dict[str, type]] = {
     Action.EDIT: {"edits": list},
     Action.PLAN: {"subgoals": list},
     Action.VERIFY: {},
+    Action.REVISE: {"field": str, "op": str},
     Action.FINISH: {},
 }
 

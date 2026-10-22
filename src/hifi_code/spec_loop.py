@@ -20,7 +20,7 @@ by a scripted driver in tests and an ``input()``-based driver in the CLI.
 from dataclasses import dataclass
 from typing import Any
 
-from .spec_schema import Kind, SpecSchema, State
+from .spec_schema import Kind, RevisionAction, RevisionRequest, SpecSchema, State
 
 
 @dataclass
@@ -68,6 +68,8 @@ class SpecLoop:
         self.spec = spec
         self.driver = driver
         self.max_rounds = max_rounds
+        # The last resolved instance, held so a revision can mutate it in place.
+        self.resolved_instance: dict[str, Any] = {}
 
     async def run(self) -> tuple[dict[str, Any] | None, str]:
         """Draft + resolve. Return ``(instance, goal)`` or ``(None, "")`` if aborted."""
@@ -88,6 +90,7 @@ class SpecLoop:
             goal = self.spec.to_goal(resolved)
             if not self.driver.present_goal(goal):
                 return None, ""
+            self.resolved_instance = resolved
             return resolved, goal
         return None, ""
 
@@ -105,13 +108,50 @@ class SpecLoop:
                 resolved[f.name] = f.default
         return resolved
 
+    def revise(self, request: RevisionRequest):
+        """Re-draft one committed field from a revision request and re-validate.
 
-async def run_outer(settings, spec: SpecSchema, driver: SpecDriver, root: str = "."):
+        The reverse of :meth:`run`: ``run`` moves a spec draft-to-resolved, this
+        mutates a committed field when the inner loop finds the spec wrong. The
+        field must exist in the schema -- an unknown field is a mechanism error,
+        not a validation error. The requested op is applied, required-with-default
+        gaps are re-materialized, and the instance is re-validated against the
+        resolved contract. Returns ``(instance, goal)`` when valid, or the
+        validation errors when it isn't, so the caller can surface them and stop
+        rather than hand a broken spec to the coding loop.
+        """
+        field = next((f for f in self.spec.fields if f.name == request.field), None)
+        if field is None:
+            return [f"unknown field {request.field!r}"]
+        resolved = dict(self.resolved_instance)
+        current = resolved.get(field.name)
+        if request.op == RevisionAction.ADD:
+            resolved[field.name] = (current or []) + (
+                [request.value] if request.value is not None else []
+            )
+        elif request.op == RevisionAction.REMOVE:
+            resolved[field.name] = [x for x in (current or []) if x != request.value]
+        else:  # REPLACE
+            resolved[field.name] = request.value
+        resolved = self._resolve(resolved)
+        errors = self.spec.validate_instance(resolved, State.RESOLVED)
+        if errors:
+            return errors
+        self.resolved_instance = resolved
+        return resolved, self.spec.to_goal(resolved)
+
+
+async def run_outer(settings, spec: SpecSchema, driver: SpecDriver, root: str = ".",
+                    max_revise_rounds: int = 5):
     """Drive the outer loop, then hand the resolved goal to the inner loop.
 
-    Emits the inner loop's results as newline-delimited JSON (matching the stdio
-    transport). Returns the goal string on success, or ``None`` if the user
-    aborted before resolving.
+    The spec is a living document: when the inner loop emits a structured
+    ``revise`` request (a structural contradiction or an unmodeled gap), the
+    outer loop applies it, re-validates, and re-seeds the inner loop with the
+    updated goal. Revisions are bounded by ``max_revise_rounds`` so the loop
+    terminates. Emits the inner loop's results as newline-delimited JSON
+    (matching the stdio transport). Returns the final goal string on success, or
+    ``None`` if the user aborted before resolving or a revision failed validation.
     """
     import json
     import logging
@@ -123,9 +163,30 @@ async def run_outer(settings, spec: SpecSchema, driver: SpecDriver, root: str = 
     resolved, goal = await loop.run()
     if resolved is None:
         return None
-    logger.info("Handing resolved spec to the inner coding loop...")
-    async for result in _drive(settings, goal, root):
-        print(json.dumps(result, ensure_ascii=False))
+    for _ in range(max_revise_rounds):
+        logger.info("Handing resolved spec to the inner coding loop...")
+        gen = _drive(settings, goal, root)
+        revised = False
+        try:
+            async for result in gen:
+                print(json.dumps(result, ensure_ascii=False))
+                if result.get("action") == "revise" and result.get("ok"):
+                    outcome = loop.revise(RevisionRequest.model_validate(result))
+                    if isinstance(outcome, list):
+                        driver.present_errors(outcome)
+                        return None
+                    revised = True
+                    resolved, goal = outcome
+                    goal = f"{goal}\n\n[spec revision] {result.get('reason', '')}"
+                    break
+        finally:
+            # Close the generator (and its ast-bro session) whether we broke out
+            # on a revise or it exhausted on a finish.
+            await gen.aclose()
+        if not revised:
+            return goal
+    logger.warning("spec revision budget (%s) exhausted; returning last goal",
+                   max_revise_rounds)
     return goal
 
 

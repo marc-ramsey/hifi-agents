@@ -25,7 +25,9 @@ async def _drive(settings: Settings, goal: str, root: str):
         while True:
             result = await planner.tick()
             yield result
-            if result.get("action") == "finish":
+            # A revise is terminal for the inner loop too: it hands control back
+            # to the outer loop to re-draft the spec, which then re-seeds us.
+            if result.get("action") in ("finish", "revise"):
                 break
             # After edits or a plan (which ran parallel subtasks that may have
             # written files), run verify to confirm nothing broke.
