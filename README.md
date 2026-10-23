@@ -105,6 +105,31 @@ overridden via environment variables.
 | `adapters/http.py` | StreamableHTTP transport (tool list + tool call) |
 | `__main__.py` | CLI wiring, arg parsing, transport dispatch |
 
+## hifi_code
+
+`hifi_code` is an autonomous coding loop: an LLM drives a set of primitives through
+the `ast-bro` code server, edits files surgically, and runs tests + lint after every
+change. It has an **inner loop** (goal → navigate/read/edit/verify → finish) and an
+optional **outer loop** (`--outer`) that drafts a machine-checkable spec with you,
+then hands it to the inner loop. If the inner loop finds the spec wrong it emits a
+structured `revise` that flows back to re-draft one field.
+
+See the full tutorial at [`docs/tutorial.md`](docs/tutorial.md).
+
+```bash
+pip install -e .
+export HIFI_CODE_LLM_MODEL=code-Ornith-1.5-35B   # required: default gpt-4o-mini will 400
+```
+
+| Command | What it does |
+|---------|--------------|
+| `hifi-code "<goal>"` | Quick mode — goal straight to the inner loop (prints NDJSON) |
+| `hifi-code --outer` | Spec-first — draft a spec with you, then code |
+| `hifi-code --transport mcp` | Expose the loop as an MCP tool (`code_loop`) |
+
+Key env vars: `HIFI_CODE_LLM_BASE_URL` (default `http://localhost:8080/v1`),
+`HIFI_CODE_LLM_MODEL` (pin this), `HIFI_CODE_SERVER` (default `ast-bro mcp`).
+
 ## Development
 
 ```bash
